@@ -11,6 +11,11 @@ dist/
 build/
 .next/
 
+# Test output
+coverage/
+test-results/
+playwright-report/
+
 # Logs
 *.log
 npm-debug.log*

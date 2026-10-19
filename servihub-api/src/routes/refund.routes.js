@@ -2,12 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
-import {
-  listRefunds,
-  getRefundById,
-  createRefund,
-  decideRefund,
-} from "../controllers/refund.controller.js";
+import { listRefunds, getRefundById, createRefund, decideRefund } from "../controllers/refund.controller.js";
 import {
   listRefundsQuerySchema,
   refundIdParamsSchema,
@@ -28,12 +23,7 @@ router.get(
   getRefundById
 );
 
-router.post(
-  "/",
-  requirePermission("refund.request"),
-  validate(createRefundBodySchema, "body"),
-  createRefund
-);
+router.post("/", requirePermission("refund.request"), validate(createRefundBodySchema, "body"), createRefund);
 
 router.patch(
   "/:id/decision",

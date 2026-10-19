@@ -1,31 +1,34 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 
-// The refunds screen has no pagination UI (tabs only), so the list
-// always requests the max page size rather than exposing page/limit
-// controls that don't exist in this view.
-const REFUNDS_LIMIT = 50;
-
-export function useRefunds(status) {
+export function useRefunds(params, { enabled = true } = {}) {
   return useQuery({
-    queryKey: ["refunds", status],
+    queryKey: ["refunds", "list", params],
     queryFn: async () => {
-      const { data } = await api.get("/refunds", { params: { status, limit: REFUNDS_LIMIT } });
+      const { data } = await api.get("/refunds", { params });
       return data;
     },
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 
 export function useRefund(id) {
   return useQuery({
-    queryKey: ["refunds", id],
+    queryKey: ["refunds", "detail", id],
     queryFn: async () => {
       const { data } = await api.get(`/refunds/${id}`);
       return data.refund;
     },
     enabled: Boolean(id),
   });
+}
+
+function invalidateRefundViews(queryClient) {
+  queryClient.invalidateQueries({ queryKey: ["refunds"] });
+  // Bookings show their refund summary; the dashboard shows pending totals.
+  queryClient.invalidateQueries({ queryKey: ["bookings"] });
+  queryClient.invalidateQueries({ queryKey: ["dashboard"] });
 }
 
 export function useRequestRefund() {
@@ -35,8 +38,9 @@ export function useRequestRefund() {
       const { data } = await api.post("/refunds", { bookingId, amount, reason });
       return data.refund;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["refunds"] });
+    onSuccess: (refund) => {
+      queryClient.setQueryData(["refunds", "detail", refund._id], refund);
+      invalidateRefundViews(queryClient);
     },
   });
 }
@@ -44,13 +48,13 @@ export function useRequestRefund() {
 export function useDecideRefund() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, decision }) => {
-      const { data } = await api.patch(`/refunds/${id}/decision`, { decision });
+    mutationFn: async ({ id, decision, note }) => {
+      const { data } = await api.patch(`/refunds/${id}/decision`, { decision, ...(note ? { note } : {}) });
       return data.refund;
     },
     onSuccess: (refund) => {
-      queryClient.setQueryData(["refunds", refund._id], refund);
-      queryClient.invalidateQueries({ queryKey: ["refunds"] });
+      queryClient.setQueryData(["refunds", "detail", refund._id], refund);
+      invalidateRefundViews(queryClient);
     },
   });
 }

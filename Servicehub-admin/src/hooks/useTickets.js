@@ -1,35 +1,52 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 
-// Shared by the REST mutation below and useTicketSocket.js's live-message
-// listener, since both can append the same message to the same ticket
-// (a sent message is both the mutation's own response AND a room
-// broadcast the sender's own socket also receives) - the dedup check
-// keeps that from double-appending.
+// Shared by the REST mutation below and the live-message socket listener,
+// since both can append the same message to the same ticket (a sent message
+// is both the mutation's own response AND a room broadcast the sender's own
+// socket also receives) - the dedup check keeps that from double-appending.
 export function appendMessageToCache(queryClient, ticketId, message) {
-  queryClient.setQueryData(["tickets", ticketId], (old) => {
+  queryClient.setQueryData(["tickets", "detail", ticketId], (old) => {
     if (!old) return old;
-    const last = old.messages[old.messages.length - 1];
-    const isDuplicate = last && last.from === message.from && last.text === message.text && last.at === message.at;
+    const isDuplicate = old.messages.some(
+      (m) => m.from === message.from && m.text === message.text && m.at === message.at
+    );
     if (isDuplicate) return old;
     return { ...old, messages: [...old.messages, message] };
   });
 }
 
-export function useTickets(params) {
+const QUEUE_PAGE_SIZE = 30;
+
+// The support queue: pages of tickets for one status, newest activity first,
+// with "Load more" fetching the next page.
+export function useTicketQueue(status) {
+  return useInfiniteQuery({
+    queryKey: ["tickets", "queue", status],
+    queryFn: async ({ pageParam }) => {
+      const { data } = await api.get("/tickets", { params: { status, page: pageParam, limit: QUEUE_PAGE_SIZE } });
+      return data;
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => (lastPage.page < lastPage.pages ? lastPage.page + 1 : undefined),
+  });
+}
+
+export function useTickets(params, { enabled = true } = {}) {
   return useQuery({
-    queryKey: ["tickets", params],
+    queryKey: ["tickets", "list", params],
     queryFn: async () => {
       const { data } = await api.get("/tickets", { params });
       return data;
     },
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 
 export function useTicket(id) {
   return useQuery({
-    queryKey: ["tickets", id],
+    queryKey: ["tickets", "detail", id],
     queryFn: async () => {
       const { data } = await api.get(`/tickets/${id}`);
       return data.ticket;
@@ -45,41 +62,40 @@ export function useSendTicketMessage(id) {
   return useMutation({
     mutationFn: async (text) => {
       const { data } = await api.post(`/tickets/${id}/messages`, { text });
-      return data.message;
+      return data;
     },
-    onSuccess: (message) => {
+    onSuccess: ({ message, status }) => {
       appendMessageToCache(queryClient, id, message);
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      queryClient.setQueryData(["tickets", "detail", id], (old) => (old ? { ...old, status } : old));
+      queryClient.invalidateQueries({ queryKey: ["tickets", "queue"] });
+      queryClient.invalidateQueries({ queryKey: ["tickets", "list"] });
+    },
+  });
+}
+
+function useTicketUpdate(id, request) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (value) => {
+      const { data } = await request(value);
+      return data.ticket;
+    },
+    onSuccess: (ticket) => {
+      // Keep the AI analysis the GET returned if the response omits it.
+      queryClient.setQueryData(["tickets", "detail", id], (old) => ({ ...old, ...ticket }));
+      queryClient.invalidateQueries({ queryKey: ["tickets", "queue"] });
+      queryClient.invalidateQueries({ queryKey: ["tickets", "list"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 }
 
 export function useUpdateTicketStatus(id) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (status) => {
-      const { data } = await api.patch(`/tickets/${id}/status`, { status });
-      return data.ticket;
-    },
-    onSuccess: (ticket) => {
-      queryClient.setQueryData(["tickets", id], ticket);
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
-    },
-  });
+  return useTicketUpdate(id, (status) => api.patch(`/tickets/${id}/status`, { status }));
 }
 
 export function useUpdateTicketPriority(id) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (priority) => {
-      const { data } = await api.patch(`/tickets/${id}/priority`, { priority });
-      return data.ticket;
-    },
-    onSuccess: (ticket) => {
-      queryClient.setQueryData(["tickets", id], ticket);
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
-    },
-  });
+  return useTicketUpdate(id, (priority) => api.patch(`/tickets/${id}/priority`, { priority }));
 }
 
 export function useAnalyzeTicket(id) {
@@ -90,9 +106,9 @@ export function useAnalyzeTicket(id) {
       return data.aiAnalysis;
     },
     onSuccess: (aiAnalysis) => {
-      queryClient.setQueryData(["tickets", id], (old) => (old ? { ...old, aiAnalysis } : old));
-      // Also refreshes the queue's hasAnalysis flag (list projection) for this ticket's AI dot.
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      queryClient.setQueryData(["tickets", "detail", id], (old) => (old ? { ...old, aiAnalysis } : old));
+      // Also refreshes the queue's hasAnalysis flag for this ticket's AI icon.
+      queryClient.invalidateQueries({ queryKey: ["tickets", "queue"] });
     },
   });
 }

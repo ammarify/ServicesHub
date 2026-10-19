@@ -31,6 +31,11 @@ export const NAV_GROUPS = [
   },
 ];
 
+// Pages that exist but aren't in the sidebar.
+const OTHER_TITLES = {
+  "/account": "Account",
+};
+
 export function getPageTitle(pathname) {
   for (const group of NAV_GROUPS) {
     for (const item of group.items) {
@@ -39,5 +44,5 @@ export function getPageTitle(pathname) {
       }
     }
   }
-  return "ServiHub Admin";
+  return OTHER_TITLES[pathname] ?? "ServiHub Admin";
 }

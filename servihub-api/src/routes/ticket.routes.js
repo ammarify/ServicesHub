@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
+import { requireDemoMode, requireSimulatorToken } from "../middleware/simulator.js";
 import { ticketSimulatorLimiter, aiAnalysisLimiter } from "../middleware/rateLimiters.js";
 import {
   listTickets,
@@ -14,6 +15,7 @@ import {
   addCustomerMessage,
   getSimulatorOptions,
   getSimulatorTicketById,
+  startSimulatorSession,
 } from "../controllers/ticket.controller.js";
 import {
   listTicketsQuerySchema,
@@ -23,34 +25,41 @@ import {
   updateTicketStatusBodySchema,
   updateTicketPriorityBodySchema,
   createTicketBodySchema,
+  simulatorSessionBodySchema,
 } from "../validators/ticket.validators.js";
 
 const router = Router();
 
-// Unauthenticated customer-simulator endpoints. There's no customer login
-// in this system (only staff have User accounts) - these stand in for an
-// external customer-facing widget, so they're rate-limited instead of
-// gated behind requireAuth/requirePermission.
-router.post(
-  "/",
-  ticketSimulatorLimiter,
-  validate(createTicketBodySchema, "body"),
-  createTicketFromCustomer
-);
+// Customer-simulator endpoints. There's no customer login in this system
+// (only staff have accounts); these stand in for an external customer
+// widget, exist only in DEMO_MODE, and every ticket-specific call needs the
+// per-ticket token returned when the ticket was opened or resumed.
+const simulator = [requireDemoMode, ticketSimulatorLimiter];
 
-router.get("/simulator/options", ticketSimulatorLimiter, getSimulatorOptions);
+router.post("/", ...simulator, validate(createTicketBodySchema, "body"), createTicketFromCustomer);
+
+router.get("/simulator/options", ...simulator, getSimulatorOptions);
+
+router.post(
+  "/simulator/session",
+  ...simulator,
+  validate(simulatorSessionBodySchema, "body"),
+  startSimulatorSession
+);
 
 router.get(
   "/simulator/:id",
-  ticketSimulatorLimiter,
+  ...simulator,
   validate(ticketIdParamsSchema, "params"),
+  requireSimulatorToken,
   getSimulatorTicketById
 );
 
 router.post(
   "/:id/customer-message",
-  ticketSimulatorLimiter,
+  ...simulator,
   validate(ticketIdParamsSchema, "params"),
+  requireSimulatorToken,
   validate(customerMessageBodySchema, "body"),
   addCustomerMessage
 );

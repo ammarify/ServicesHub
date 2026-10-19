@@ -2,7 +2,7 @@ import { Search } from "lucide-react";
 import { Input } from "../../components/ui/Input";
 import { Toolbar } from "../../components/ui/Toolbar";
 
-export function CustomersToolbar({ search, setSearch, totalCount }) {
+export function CustomersToolbar({ search, setSearch, actions }) {
   return (
     <Toolbar className="justify-between">
       <div className="relative">
@@ -14,13 +14,12 @@ export function CustomersToolbar({ search, setSearch, totalCount }) {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search by name or phone..."
+          aria-label="Search customers"
           className="w-64 pl-8"
         />
       </div>
 
-      <div className="text-[13px] text-text-secondary">
-        <span className="font-data text-text-primary">{totalCount}</span> customers
-      </div>
+      {actions && <div className="flex items-center gap-3">{actions}</div>}
     </Toolbar>
   );
 }

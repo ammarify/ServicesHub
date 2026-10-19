@@ -5,8 +5,8 @@ const { Schema } = mongoose;
 const customerSchema = new Schema(
   {
     name: { type: String, required: true, trim: true, index: true },
-    phone: { type: String, required: true, index: true },
-    area: { type: String, required: true },
+    phone: { type: String, required: true, trim: true, index: true },
+    area: { type: String, required: true, trim: true },
     joinedAt: { type: Date, required: true },
   },
   { timestamps: true, versionKey: false }

@@ -1,21 +1,43 @@
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
+import { env } from "../config/env.js";
 import { connectDB } from "../config/db.js";
-import { User, Provider, Customer, Booking, Ticket, Refund } from "../models/index.js";
+import {
+  User,
+  Provider,
+  Customer,
+  Booking,
+  Ticket,
+  Refund,
+  Session,
+  PasswordToken,
+  Counter,
+} from "../models/index.js";
 import { team, providers, customers, bookings, tickets, refunds } from "./mockData.js";
+import { SEED_ANCHOR_DATE, makeDateShifter } from "./relativeDates.js";
 
 const SEED_PASSWORD = "Demo@1234";
 const SUPPORT_AGENT_IDS = ["TM-004", "TM-005"];
 
+// The mock data was written around a fixed "now" (SEED_ANCHOR_DATE). Every
+// activity date is moved forward by whole days so that, whenever the seed
+// runs, today's bookings/tickets/refunds line up with the real today and the
+// dashboard shows a live-looking picture instead of months-old data.
+const shift = makeDateShifter(new Date());
+
+// Saves with the createdAt/updatedAt given in `doc` instead of "now", so the
+// seeded history keeps its original ordering (the support queue sorts by
+// updatedAt, the dashboard's recent bookings by createdAt).
+function saveWithTimestamps(Model, doc) {
+  return new Model(doc).save({ timestamps: false });
+}
+
 async function wipe() {
-  await Promise.all([
-    User.deleteMany({}),
-    Provider.deleteMany({}),
-    Customer.deleteMany({}),
-    Booking.deleteMany({}),
-    Ticket.deleteMany({}),
-    Refund.deleteMany({}),
-  ]);
+  await Promise.all(
+    [User, Provider, Customer, Booking, Ticket, Refund, Session, PasswordToken, Counter].map((Model) =>
+      Model.deleteMany({})
+    )
+  );
 }
 
 async function seedUsers() {
@@ -23,13 +45,16 @@ async function seedUsers() {
   const idMap = new Map();
 
   for (const member of team) {
-    const user = await User.create({
+    const joinedAt = new Date(member.joinedAt);
+    const user = await saveWithTimestamps(User, {
       name: member.name,
       email: member.email,
       passwordHash,
       role: member.role,
       status: "active",
-      createdAt: new Date(member.joinedAt),
+      passwordSetAt: joinedAt,
+      createdAt: joinedAt,
+      updatedAt: joinedAt,
     });
     idMap.set(member.id, user._id);
   }
@@ -66,7 +91,7 @@ async function seedCustomers() {
       name: c.name,
       phone: c.phone,
       area: c.area,
-      joinedAt: new Date(c.joinedAt),
+      joinedAt: shift(c.joinedAt),
     });
     idMap.set(c.id, customer._id);
   }
@@ -78,16 +103,22 @@ async function seedBookings(customerIdMap, providerIdMap) {
   const idMap = new Map();
 
   for (const b of bookings) {
-    const booking = await Booking.create({
+    const timeline = b.timeline.map((t) => ({ event: t.event, at: shift(t.at) }));
+    const createdAt = timeline.find((t) => t.event === "created")?.at ?? shift(b.scheduledAt);
+
+    const booking = await saveWithTimestamps(Booking, {
       code: b.id,
       customer: customerIdMap.get(b.customerId),
-      provider: providerIdMap.get(b.providerId),
+      // Pending bookings have no provider yet.
+      provider: b.status === "pending" ? undefined : providerIdMap.get(b.providerId),
       service: b.service,
       status: b.status,
-      scheduledAt: new Date(b.scheduledAt),
+      scheduledAt: shift(b.scheduledAt),
       amount: b.amount,
       address: b.address,
-      timeline: b.timeline.map((t) => ({ event: t.event, at: new Date(t.at) })),
+      timeline,
+      createdAt,
+      updatedAt: timeline[timeline.length - 1]?.at ?? createdAt,
     });
     idMap.set(b.id, booking._id);
   }
@@ -106,10 +137,10 @@ async function seedTickets(bookingIdMap, customerIdMap, customerNameMap) {
       from: m.from,
       senderName: m.from === "customer" ? customerNameMap.get(t.customerId) : agentName,
       text: m.text,
-      at: new Date(m.at),
+      at: shift(m.at),
     }));
 
-    await Ticket.create({
+    await saveWithTimestamps(Ticket, {
       code: t.id,
       booking: bookingIdMap.get(t.bookingId),
       customer: customerIdMap.get(t.customerId),
@@ -117,7 +148,8 @@ async function seedTickets(bookingIdMap, customerIdMap, customerNameMap) {
       priority: t.priority,
       status: t.status,
       messages,
-      createdAt: new Date(t.createdAt),
+      createdAt: shift(t.createdAt),
+      updatedAt: messages[messages.length - 1]?.at ?? shift(t.createdAt),
     });
   }
 }
@@ -130,10 +162,10 @@ async function seedRefunds(bookingIdMap, userIdMap) {
     requesterIndex += 1;
 
     const decidedBy = r.decidedBy ? userIdMap.get(r.decidedBy) : null;
-    const requestedAt = new Date(r.requestedAt);
+    const requestedAt = shift(r.requestedAt);
     const decidedAt = decidedBy ? new Date(requestedAt.getTime() + 24 * 60 * 60 * 1000) : null;
 
-    await Refund.create({
+    await saveWithTimestamps(Refund, {
       code: r.id,
       booking: bookingIdMap.get(r.bookingId),
       amount: r.amount,
@@ -143,12 +175,20 @@ async function seedRefunds(bookingIdMap, userIdMap) {
       decidedBy,
       decidedAt,
       createdAt: requestedAt,
+      updatedAt: decidedAt ?? requestedAt,
     });
   }
 }
 
 async function seed() {
+  if (env.NODE_ENV === "production" && !process.argv.includes("--force")) {
+    console.error("Refusing to wipe and reseed a production database. Re-run with --force if you really mean it.");
+    process.exit(1);
+  }
+
   await connectDB();
+  // Make sure unique/partial indexes exist before inserting.
+  await Promise.all([User, Provider, Customer, Booking, Ticket, Refund, Session, PasswordToken].map((M) => M.init()));
   await wipe();
 
   const userIdMap = await seedUsers();
@@ -168,8 +208,9 @@ async function seed() {
     refunds: await Refund.countDocuments(),
   };
 
-  console.log("Seed complete:");
+  console.log(`Seed complete (dates shifted from ${SEED_ANCHOR_DATE} to today):`);
   console.table(counts);
+  console.log(`All seeded staff accounts use the password ${SEED_PASSWORD}`);
 
   await mongoose.disconnect();
   process.exit(0);

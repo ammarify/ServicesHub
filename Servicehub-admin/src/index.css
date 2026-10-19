@@ -2,6 +2,13 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 
+/* Height breakpoints, for layouts that must fit the window without
+   scrolling: `short` matches laptop screens such as 1920×1080 at 125%
+   scaling (about 700px of page height) or 1366×768, `shorter` 1280×720
+   laptops and small phones. */
+@custom-variant short (@media (max-height: 760px));
+@custom-variant shorter (@media (max-height: 640px));
+
 :root {
   --color-canvas: #f7f7f8;
   --color-surface: #ffffff;
@@ -11,6 +18,8 @@
   --color-accent: #2563eb;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04);
+  /* Floating layers only: menus, toasts, the guided tour, dialogs. */
+  --shadow-pop: 0 12px 32px -12px rgb(16 24 40 / 0.18), 0 2px 6px -2px rgb(16 24 40 / 0.08);
 
   /* Tells the browser to render native form controls (select dropdowns,
      date pickers) and default scrollbars using dark-appropriate system
@@ -28,6 +37,7 @@
   --color-accent: #3b82f6;
 
   --shadow-card: none;
+  --shadow-pop: 0 16px 40px -12px rgb(0 0 0 / 0.75);
 
   color-scheme: dark;
 }
@@ -49,6 +59,7 @@
   --radius-btn: 6px;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-pop: 0 12px 32px -12px rgb(16 24 40 / 0.18), 0 2px 6px -2px rgb(16 24 40 / 0.08);
 
   --font-sans: "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
@@ -117,7 +128,7 @@
     font-feature-settings: "tnum";
   }
 
-  /* Micro-interactions — kept to exactly these four, each single-purpose.
+  /* Micro-interactions, each single-purpose.
      All respect prefers-reduced-motion via the global rule above, which
      forces animation-duration/transition-duration to ~0 for every element. */
 
@@ -175,5 +186,70 @@
 
   .animate-highlight-pulse {
     animation: highlight-pulse 1000ms ease-out;
+  }
+
+  /* Live-state signals. Both stop under prefers-reduced-motion. */
+
+  @keyframes typing-dot {
+    0%,
+    60%,
+    100% {
+      opacity: 0.35;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+
+  .animate-typing-dot {
+    animation: typing-dot 1.2s ease-in-out infinite;
+  }
+
+  @keyframes live-ping {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-success) 55%, transparent);
+    }
+    70%,
+    100% {
+      box-shadow: 0 0 0 6px transparent;
+    }
+  }
+
+  .animate-live {
+    animation: live-ping 2s ease-out infinite;
+  }
+
+  /* Toasts count down their own auto-dismiss. */
+  @keyframes toast-countdown {
+    from {
+      transform: scaleX(1);
+    }
+    to {
+      transform: scaleX(0);
+    }
+  }
+
+  .animate-toast-countdown {
+    animation: toast-countdown linear forwards;
+    transform-origin: left;
+  }
+
+  /* The sign-in page's one entrance: the product preview's cards settle
+     into place one after another (delays set inline). */
+  @keyframes preview-enter {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-preview-enter {
+    animation: preview-enter 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
 }

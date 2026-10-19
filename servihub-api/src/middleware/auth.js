@@ -1,32 +1,43 @@
+import mongoose from "mongoose";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { verifyAccessToken } from "../utils/jwt.js";
-import { User } from "../models/index.js";
+import { ACCESS_COOKIE } from "../utils/cookies.js";
+import { Session, User } from "../models/index.js";
 
-// requireAuth only verifies the JWT's signature/expiry by default, which
-// means a still-valid (up to 15min-lived) access token keeps working even
-// after an admin disables the user or changes their role - the token
-// itself doesn't know either happened. Re-reading the user on every
-// single request would fix that instantly but adds a DB round trip to
-// every authenticated call in the app; a Redis-backed revocation list
-// would fix it across multiple server instances too, but this app has
-// neither Redis nor multiple instances today.
+// A valid JWT on its own says nothing about whether the account was
+// disabled, its role changed, "log out everywhere" was used, or the device
+// signed out after the token was issued. Re-reading the user and session on
+// every request would answer that exactly but costs DB round trips per
+// call, so short in-process caches sit in between: { status, role,
+// tokenVersion } per user and "still open?" per session.
 //
-// Chosen middle ground: a short in-process TTL cache of {status, role}
-// per userId. Cache hits (the common case) cost nothing extra; a miss or
-// expiry does one lightweight `select("status role")` lookup. This bounds
-// "disabled user with a live token" and "stale role on a live token" to
-// at most AUTH_CACHE_TTL_MS instead of the full access-token lifetime -
-// and invalidateAuthCache() (called by the team controller right after a
-// role/status change) makes the common admin-driven case instant instead
-// of waiting out the TTL. The one real limitation: this cache is
-// per-process, so in a horizontally-scaled deployment a disable would
-// only be instant on the instance that handled it - other instances
-// would still catch up within the TTL. Acceptable for this app's single
-// server-instance scale; a multi-instance deployment would want a shared
-// store (Redis) instead.
+// - cache hits (the common case) cost nothing;
+// - a miss does one small, indexed lookup;
+// - invalidateAuthCache() / invalidateSessionCache() run right after an
+//   admin change or a sign-out, so those take effect immediately on this
+//   instance.
+//
+// The cache is per process. With several API instances, an instance that
+// didn't handle the change catches up within AUTH_CACHE_TTL_MS; a shared
+// store (Redis) would be the next step for a horizontally scaled deploy.
 const AUTH_CACHE_TTL_MS = 60 * 1000;
+// Entries expire on read; this only stops a long-running process from
+// keeping every user/session it has ever seen.
+const MAX_CACHE_ENTRIES = 10_000;
 const authCache = new Map();
+const sessionCache = new Map();
+
+function remember(cache, key, value) {
+  if (cache.size >= MAX_CACHE_ENTRIES) {
+    const now = Date.now();
+    for (const [entryKey, entry] of cache) {
+      if (entry.expiresAt <= now) cache.delete(entryKey);
+    }
+    if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
+  }
+  cache.set(key, value);
+}
 
 async function getFreshAuthState(userId) {
   const cached = authCache.get(userId);
@@ -35,25 +46,58 @@ async function getFreshAuthState(userId) {
     return cached;
   }
 
-  const user = await User.findById(userId).select("status role");
+  const user = await User.findById(userId).select("name status role tokenVersion").lean();
   const state = {
+    exists: Boolean(user),
+    name: user?.name ?? null,
     status: user?.status ?? null,
     role: user?.role ?? null,
+    tokenVersion: user?.tokenVersion ?? null,
     expiresAt: now + AUTH_CACHE_TTL_MS,
   };
-  authCache.set(userId, state);
+  remember(authCache, userId, state);
   return state;
+}
+
+// Whether the sign-in session an access token belongs to is still open.
+// Signing out (or a detected refresh-token replay) revokes the session; this
+// check makes the access token issued for it stop working at once too,
+// instead of staying valid until it expires.
+async function isSessionActive(sessionId) {
+  if (!mongoose.isValidObjectId(sessionId)) return false;
+
+  const cached = sessionCache.get(sessionId);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return cached.active;
+  }
+
+  const session = await Session.findById(sessionId).select("revokedAt expiresAt").lean();
+  const active = Boolean(session && !session.revokedAt && session.expiresAt > new Date(now));
+  remember(sessionCache, sessionId, { active, expiresAt: now + AUTH_CACHE_TTL_MS });
+  return active;
 }
 
 export function invalidateAuthCache(userId) {
   authCache.delete(userId.toString());
 }
 
-export const requireAuth = asyncHandler(async (req, res, next) => {
-  const token = req.cookies?.accessToken;
+export function invalidateSessionCache(sessionId) {
+  sessionCache.delete(sessionId.toString());
+}
 
+// Shared by the HTTP middleware below and the Socket.IO handshake, so both
+// transports apply exactly the same rules. Throws ApiError(401) with a
+// machine-readable code the admin app reacts to:
+//   AUTH_REQUIRED    - no token at all
+//   TOKEN_EXPIRED    - token expired; the client should call /auth/refresh
+//   INVALID_TOKEN    - malformed/forged token, or the user no longer exists
+//   ACCOUNT_DISABLED - an admin disabled the account
+//   SESSION_REVOKED  - password changed, "log out everywhere", role change,
+//                      or this device's session was signed out / revoked
+export async function authenticateAccessToken(token) {
   if (!token) {
-    return next(new ApiError(401, "Authentication required"));
+    throw new ApiError(401, "Authentication required", "AUTH_REQUIRED");
   }
 
   let payload;
@@ -61,20 +105,28 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
     payload = verifyAccessToken(token);
   } catch (err) {
     if (err.name === "TokenExpiredError") {
-      return next(new ApiError(401, "Access token expired", "TOKEN_EXPIRED"));
+      throw new ApiError(401, "Access token expired", "TOKEN_EXPIRED");
     }
-    return next(new ApiError(401, "Invalid authentication token"));
+    throw new ApiError(401, "Invalid authentication token", "INVALID_TOKEN");
   }
 
   const state = await getFreshAuthState(payload.userId);
+  if (!state.exists) {
+    throw new ApiError(401, "Invalid authentication token", "INVALID_TOKEN");
+  }
   if (state.status !== "active") {
-    return next(new ApiError(401, "This account has been disabled", "ACCOUNT_DISABLED"));
+    throw new ApiError(401, "This account has been disabled", "ACCOUNT_DISABLED");
+  }
+  if (payload.tv !== state.tokenVersion || !(await isSessionActive(payload.sid))) {
+    throw new ApiError(401, "Your session has ended. Please sign in again.", "SESSION_REVOKED");
   }
 
-  // role comes from the cached/fresh DB read, not the JWT payload, so a
-  // role change takes effect for permission checks within AUTH_CACHE_TTL_MS
-  // (or instantly, via invalidateAuthCache) rather than only after the
-  // access token itself expires and is refreshed.
-  req.user = { userId: payload.userId, role: state.role };
+  // The role comes from the (cached) database read, not the JWT, so
+  // permission checks always use the current role.
+  return { userId: payload.userId, role: state.role, name: state.name, sessionId: payload.sid };
+}
+
+export const requireAuth = asyncHandler(async (req, res, next) => {
+  req.user = await authenticateAccessToken(req.cookies?.[ACCESS_COOKIE]);
   next();
 });

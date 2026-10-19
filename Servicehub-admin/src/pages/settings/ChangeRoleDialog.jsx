@@ -1,57 +1,54 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { FormField } from "../../components/ui/FormField";
+import { Select } from "../../components/ui/Select";
+import { ROLE_OPTIONS } from "./roles";
 
-const ROLE_OPTIONS = ["super_admin", "manager", "support_agent", "finance"];
-
-export function ChangeRoleDialog({ member, open, onClose, onSubmit }) {
-  const [role, setRole] = useState("support_agent");
-
-  useEffect(() => {
-    if (member) setRole(member.role);
-  }, [member]);
-
-  function handleSubmit() {
-    if (!member) return;
-    onSubmit(member.id, role);
-    onClose();
-  }
+function ChangeRoleForm({ member, onClose, onSubmit, isSubmitting, error }) {
+  const [role, setRole] = useState(member.role);
 
   return (
     <ConfirmDialog
-      open={open}
+      open
       onClose={onClose}
       title="Change role"
+      onSubmit={() => onSubmit(member._id, role)}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleSubmit}>
-            Save
+          <Button type="submit" variant="primary" disabled={isSubmitting || role === member.role}>
+            {isSubmitting ? "Saving…" : "Save"}
           </Button>
         </>
       }
     >
-      {member && (
-        <div className="flex flex-col gap-3 text-left">
-          <p>
-            Update the role for{" "}
-            <span className="font-medium text-text-primary">{member.name}</span>.
-          </p>
-          <select
-            value={role}
-            onChange={(event) => setRole(event.target.value)}
-            className="h-9 w-full rounded-card border border-border bg-surface px-3 text-[13px] text-text-primary"
-          >
+      <div className="flex flex-col gap-3 text-left">
+        <p>
+          Update the role for <span className="font-medium text-text-primary">{member.name}</span>. They'll be signed
+          out and see their new permissions the next time they sign in.
+        </p>
+        <FormField label="Role" hint={ROLE_OPTIONS.find((option) => option.value === role)?.description}>
+          <Select value={role} onChange={(event) => setRole(event.target.value)}>
             {ROLE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
+              <option key={option.value} value={option.value}>
+                {option.label}
               </option>
             ))}
-          </select>
-        </div>
-      )}
+          </Select>
+        </FormField>
+        {error && (
+          <p role="alert" className="text-[13px] text-danger">
+            {error}
+          </p>
+        )}
+      </div>
     </ConfirmDialog>
   );
+}
+
+export function ChangeRoleDialog({ member, ...props }) {
+  return member ? <ChangeRoleForm member={member} {...props} /> : null;
 }

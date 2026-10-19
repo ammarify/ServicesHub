@@ -4,18 +4,56 @@ import { NavLink } from "react-router-dom";
 import { Logo } from "../components/ui/Logo";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
-import { canViewPath } from "../lib/permissions";
+import { useRefunds } from "../hooks/useRefunds";
+import { useTickets } from "../hooks/useTickets";
+import { formatNumber } from "../lib/formatters";
+import { can, canViewPath } from "../lib/permissions";
 import { NAV_GROUPS } from "./navigation";
 import { SidebarSearch } from "./SidebarSearch";
 import { UserMenu } from "./UserMenu";
 
+// What's waiting on a page, shown beside its link: new tickets nobody has
+// picked up and refunds waiting for a decision. Both stay current through
+// the realtime invalidations in RealtimeBridge.
+function useNavCounts(user) {
+  const openTickets = useTickets({ status: "open", limit: 1 }, { enabled: can(user, "ticket.read") });
+  const pendingRefunds = useRefunds({ status: "pending", limit: 1 }, { enabled: can(user, "refund.read") });
+  return {
+    "/support": { count: openTickets.data?.total ?? 0, label: "open tickets" },
+    "/refunds": { count: pendingRefunds.data?.counts?.pending ?? 0, label: "refunds waiting for a decision" },
+  };
+}
+
+function NavCount({ count, label, isActive }) {
+  if (!count) return null;
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        className={clsx(
+          "font-data ml-auto min-w-5 rounded-full px-1.5 text-center text-[11px] leading-5 md:hidden lg:inline-block",
+          isActive ? "bg-accent text-white" : "bg-accent/10 text-accent"
+        )}
+      >
+        {count > 99 ? "99+" : formatNumber(count)}
+      </span>
+      {/* Icon-only sidebar (md): a dot instead of the number. */}
+      <span aria-hidden="true" className="absolute right-2 top-1.5 hidden h-1.5 w-1.5 rounded-full bg-accent md:block lg:hidden" />
+      <span className="sr-only">
+        , {formatNumber(count)} {label}
+      </span>
+    </>
+  );
+}
+
 export function Sidebar({ isOpen, onClose }) {
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
+  const counts = useNavCounts(user);
 
   const visibleGroups = NAV_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => canViewPath(user.role, item.to)),
+    items: group.items.filter((item) => canViewPath(user, item.to)),
   })).filter((group) => group.items.length > 0);
 
   return (
@@ -41,11 +79,11 @@ export function Sidebar({ isOpen, onClose }) {
           </span>
         </div>
 
-        <div className="border-b border-border p-3 md:hidden lg:block">
-          <SidebarSearch />
+        <div className="border-b border-border p-3 md:hidden lg:block" data-tour="search">
+          <SidebarSearch onNavigate={onClose} />
         </div>
 
-        <nav className="flex-1 space-y-4 overflow-y-auto p-3">
+        <nav aria-label="Main" className="flex-1 space-y-4 overflow-y-auto p-3" data-tour="nav">
           {visibleGroups.map((group) => (
             <div key={group.label}>
               <div className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-text-secondary md:hidden lg:block">
@@ -58,17 +96,27 @@ export function Sidebar({ isOpen, onClose }) {
                     to={item.to}
                     onClick={onClose}
                     title={item.label}
+                    data-tour={`nav-${item.to}`}
                     className={({ isActive }) =>
                       clsx(
-                        "flex items-center gap-2.5 rounded-btn px-2.5 py-2 text-[13px] transition-colors md:justify-center lg:justify-start",
+                        "relative flex items-center gap-2.5 rounded-btn px-2.5 py-2 text-[13px] transition-colors md:justify-center lg:justify-start",
                         isActive
-                          ? "bg-accent/10 text-accent"
+                          ? "bg-accent/10 font-medium text-accent"
                           : "text-text-secondary hover:bg-canvas hover:text-text-primary",
                       )
                     }
                   >
-                    <item.icon size={16} className="shrink-0" />
-                    <span className="md:hidden lg:inline">{item.label}</span>
+                    {({ isActive }) => (
+                      <>
+                        {/* A short accent bar marks the current page. */}
+                        {isActive && (
+                          <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-accent" />
+                        )}
+                        <item.icon size={16} className="shrink-0" />
+                        <span className="md:hidden lg:inline">{item.label}</span>
+                        {counts[item.to] && <NavCount {...counts[item.to]} isActive={isActive} />}
+                      </>
+                    )}
                   </NavLink>
                 ))}
               </div>
@@ -80,6 +128,8 @@ export function Sidebar({ isOpen, onClose }) {
           <button
             type="button"
             onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            data-tour="theme"
             className="flex w-full items-center gap-2.5 rounded-btn px-2.5 py-2 text-[13px] text-text-secondary transition-colors hover:bg-canvas hover:text-text-primary md:justify-center lg:justify-start"
           >
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
@@ -89,7 +139,7 @@ export function Sidebar({ isOpen, onClose }) {
           </button>
 
           <div className="mt-2">
-            <UserMenu />
+            <UserMenu onNavigate={onClose} />
           </div>
         </div>
       </aside>

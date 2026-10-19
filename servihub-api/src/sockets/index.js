@@ -1,12 +1,14 @@
+import mongoose from "mongoose";
 import { Server } from "socket.io";
 import { env } from "../config/env.js";
-import { verifyAccessToken } from "../utils/jwt.js";
-import { Ticket, Customer } from "../models/index.js";
-import { appendMessage } from "../services/ticket.service.js";
+import { authenticateAccessToken } from "../middleware/auth.js";
+import { hasPermission } from "../middleware/rbac.js";
+import { verifySimulatorToken } from "../utils/jwt.js";
+import { ACCESS_COOKIE } from "../utils/cookies.js";
+import { MAX_MESSAGE_LENGTH, postCustomerMessage } from "../services/ticket.service.js";
+import { ROOMS, setIO } from "./emitter.js";
 
-const MAX_MESSAGE_LENGTH = 2000;
-
-let io = null;
+export { getIO } from "./emitter.js";
 
 function parseCookies(header) {
   const cookies = {};
@@ -14,122 +16,173 @@ function parseCookies(header) {
   for (const pair of header.split(";")) {
     const idx = pair.indexOf("=");
     if (idx === -1) continue;
-    cookies[pair.slice(0, idx).trim()] = decodeURIComponent(pair.slice(idx + 1).trim());
+    try {
+      cookies[pair.slice(0, idx).trim()] = decodeURIComponent(pair.slice(idx + 1).trim());
+    } catch {
+      // malformed cookie value - ignore it
+    }
   }
   return cookies;
 }
 
-// Sockets are a delivery layer only - every mutation here (appendMessage +
-// ticket.save()) is the exact same service call the REST controllers use,
-// so there is one write path regardless of whether a message arrives via
-// HTTP or a socket event.
-function registerConnectionHandlers(socket) {
-  if (!socket.data.isSimulator) {
-    socket.join("agents");
-  }
+function socketError(message, code) {
+  const err = new Error(message);
+  err.data = { code };
+  return err;
+}
 
-  socket.on("ticket:join", (ticketId) => {
-    if (typeof ticketId === "string" && ticketId) socket.join(`ticket:${ticketId}`);
+function isObjectId(value) {
+  return typeof value === "string" && mongoose.isValidObjectId(value);
+}
+
+function reply(callback, payload) {
+  if (typeof callback === "function") callback(payload);
+}
+
+// Staff sockets authenticate exactly like REST requests (same JWT checks,
+// same live account status/role/tokenVersion lookup). Each one joins:
+//   user:<id>     - so disabling a user / "log out everywhere" can drop it
+//   session:<sid> - so signing out one device drops that device's socket
+//   agents        - only with ticket.read (new tickets, queue updates)
+//   approvers     - only with refund.approve (refund requests)
+async function authenticateStaff(socket) {
+  const cookies = parseCookies(socket.handshake.headers.cookie);
+  const auth = await authenticateAccessToken(cookies[ACCESS_COOKIE]);
+
+  socket.data.isSimulator = false;
+  socket.data.userId = auth.userId;
+  socket.data.role = auth.role;
+  socket.data.sessionId = auth.sessionId ?? null;
+}
+
+function registerStaffHandlers(socket) {
+  const { userId, role, sessionId } = socket.data;
+  socket.join(ROOMS.user(userId));
+  if (sessionId) socket.join(ROOMS.session(sessionId));
+  if (hasPermission(role, "ticket.read")) socket.join(ROOMS.agents);
+  if (hasPermission(role, "refund.approve")) socket.join(ROOMS.approvers);
+
+  const canReadTickets = () => hasPermission(socket.data.role, "ticket.read");
+
+  socket.on("ticket:join", (ticketId, callback) => {
+    if (!canReadTickets()) return reply(callback, { ok: false, message: "Insufficient permissions" });
+    if (!isObjectId(ticketId)) return reply(callback, { ok: false, message: "Invalid ticket" });
+    socket.join(ROOMS.ticket(ticketId));
+    reply(callback, { ok: true });
   });
 
   socket.on("ticket:leave", (ticketId) => {
-    if (typeof ticketId === "string" && ticketId) socket.leave(`ticket:${ticketId}`);
+    if (isObjectId(ticketId)) socket.leave(ROOMS.ticket(ticketId));
   });
 
-  // Passthrough, but "from" is derived server-side from which kind of
-  // socket this is rather than trusted from the client payload - otherwise
-  // a simulator connection (or any client) could claim from: "agent" and
-  // spoof a staff typing indicator, or vice versa. The 2s auto-clear is a
-  // client-side concern.
+  // "from" is decided by the server from the kind of socket, never taken
+  // from the client, so nobody can fake the other side's typing indicator.
   socket.on("typing", ({ ticketId } = {}) => {
-    if (typeof ticketId !== "string" || !ticketId) return;
-    const from = socket.data.isSimulator ? "customer" : "agent";
-    socket.to(`ticket:${ticketId}`).emit("typing", { ticketId, from });
+    if (!isObjectId(ticketId) || !socket.rooms.has(ROOMS.ticket(ticketId))) return;
+    socket.to(ROOMS.ticket(ticketId)).emit("typing", { ticketId, from: "agent" });
+  });
+
+  socket.on("customer:message", (payload, callback) => {
+    reply(callback, { ok: false, message: "Only the customer widget can send customer messages" });
+  });
+}
+
+// Simulator sockets (the public demo customer widget) have no identity of
+// their own. Each ticket they want to follow must be unlocked with the
+// per-ticket token the API handed out when the ticket was opened or picked,
+// and they can only ever see or post to those tickets.
+function registerSimulatorHandlers(socket) {
+  const unlocked = new Set();
+  socket.data.tickets = unlocked;
+
+  socket.on("ticket:join", (payload, callback) => {
+    const { ticketId, token } = payload ?? {};
+    if (!isObjectId(ticketId) || typeof token !== "string") {
+      return reply(callback, { ok: false, message: "Invalid ticket" });
+    }
+    try {
+      const claims = verifySimulatorToken(token);
+      if (claims.ticketId !== ticketId) throw new Error("token/ticket mismatch");
+    } catch {
+      return reply(callback, { ok: false, message: "This chat link has expired. Start over." });
+    }
+    unlocked.add(ticketId);
+    socket.join(ROOMS.ticket(ticketId));
+    reply(callback, { ok: true });
+  });
+
+  socket.on("ticket:leave", (payload) => {
+    const ticketId = typeof payload === "string" ? payload : payload?.ticketId;
+    if (!isObjectId(ticketId)) return;
+    unlocked.delete(ticketId);
+    socket.leave(ROOMS.ticket(ticketId));
+  });
+
+  socket.on("typing", ({ ticketId } = {}) => {
+    if (!unlocked.has(ticketId)) return;
+    socket.to(ROOMS.ticket(ticketId)).emit("typing", { ticketId, from: "customer" });
   });
 
   socket.on("customer:message", async ({ ticketId, text } = {}, callback) => {
-    const ack = typeof callback === "function" ? callback : () => {};
-
-    if (!socket.data.isSimulator) {
-      return ack({ ok: false, message: "Only the simulator can send customer messages" });
+    if (!unlocked.has(ticketId)) {
+      return reply(callback, { ok: false, message: "Open the ticket before sending messages" });
     }
-    if (typeof ticketId !== "string" || !ticketId || typeof text !== "string" || !text.trim()) {
-      return ack({ ok: false, message: "Invalid payload" });
+    if (typeof text !== "string" || !text.trim()) {
+      return reply(callback, { ok: false, message: "Message can't be empty" });
     }
     if (text.trim().length > MAX_MESSAGE_LENGTH) {
-      return ack({ ok: false, message: "Message is too long" });
+      return reply(callback, { ok: false, message: "Message is too long" });
     }
 
     try {
-      const ticket = await Ticket.findById(ticketId);
-      if (!ticket) return ack({ ok: false, message: "Ticket not found" });
-
-      const customer = await Customer.findById(ticket.customer);
-      if (!customer) return ack({ ok: false, message: "Customer not found" });
-
-      const message = appendMessage(ticket, {
-        from: "customer",
-        senderName: customer.name,
-        text: text.trim(),
-      });
-      await ticket.save();
-
-      io.to(`ticket:${ticketId}`).emit("ticket:message", { ticketId, message });
-      ack({ ok: true, message });
-    } catch {
-      ack({ ok: false, message: "Something went wrong" });
+      const { message } = await postCustomerMessage(ticketId, text.trim());
+      reply(callback, { ok: true, message });
+    } catch (err) {
+      reply(callback, { ok: false, message: err.statusCode === 404 ? err.message : "Something went wrong" });
     }
   });
 }
 
 export function initSockets(httpServer) {
-  io = new Server(httpServer, {
+  const io = new Server(httpServer, {
     cors: {
-      // Same reasoning as app.js's CORS config: an explicit allow-list
-      // function instead of a static string, so only a genuinely matching
-      // Origin gets reflected back.
+      // Same allow-list as the REST API (see app.js).
       origin(origin, callback) {
-        if (!origin || origin === env.CLIENT_URL) {
+        if (!origin || env.CLIENT_URL.includes(origin)) {
           return callback(null, true);
         }
         callback(new Error("Not allowed by CORS"));
       },
       credentials: true,
-      methods: ["GET", "POST", "PATCH", "DELETE"],
+      methods: ["GET", "POST"],
     },
   });
 
-  io.use((socket, next) => {
-    if (socket.handshake.auth?.role === "simulator") {
-      socket.data.isSimulator = true;
-      return next();
-    }
-
-    const cookies = parseCookies(socket.handshake.headers.cookie);
-    const token = cookies.accessToken;
-    if (!token) {
-      return next(new Error("Authentication required"));
-    }
-
+  io.use(async (socket, next) => {
     try {
-      const payload = verifyAccessToken(token);
-      socket.data.isSimulator = false;
-      socket.data.userId = payload.userId;
-      socket.data.role = payload.role;
+      if (socket.handshake.auth?.role === "simulator") {
+        if (!env.DEMO_MODE) {
+          return next(socketError("The customer simulator is disabled", "FEATURE_DISABLED"));
+        }
+        socket.data.isSimulator = true;
+        return next();
+      }
+
+      await authenticateStaff(socket);
       next();
-    } catch {
-      next(new Error("Invalid or expired session"));
+    } catch (err) {
+      next(socketError(err.statusCode === 401 ? err.message : "Connection refused", err.code ?? "AUTH_REQUIRED"));
     }
   });
 
-  io.on("connection", registerConnectionHandlers);
+  io.on("connection", (socket) => {
+    if (socket.data.isSimulator) {
+      registerSimulatorHandlers(socket);
+    } else {
+      registerStaffHandlers(socket);
+    }
+  });
 
-  return io;
-}
-
-// Returns null (rather than throwing) if sockets haven't been initialized -
-// controllers use `getIO()?.to(...)` so a request never fails just because
-// the delivery layer isn't up.
-export function getIO() {
+  setIO(io);
   return io;
 }

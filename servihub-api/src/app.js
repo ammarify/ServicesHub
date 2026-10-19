@@ -9,6 +9,7 @@ import { sanitizeInput } from "./middleware/sanitizeInput.js";
 import { notFound } from "./middleware/notFound.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import healthRoutes from "./routes/health.routes.js";
+import configRoutes from "./routes/config.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import bookingRoutes from "./routes/booking.routes.js";
 import providerRoutes from "./routes/provider.routes.js";
@@ -22,25 +23,21 @@ import teamRoutes from "./routes/team.routes.js";
 export function createApp() {
   const app = express();
 
+  // Behind a reverse proxy (Render, Railway, nginx...) this makes req.ip the
+  // real client address, which rate limiting depends on.
+  app.set("trust proxy", env.TRUST_PROXY);
+  app.disable("x-powered-by");
+
   app.use(helmet());
 
   app.use(
     cors({
-      // A static string here (the previous config) still isn't exploitable
-      // by a browser - the cors package would echo that fixed value back
-      // on every response regardless of the request's actual Origin, and
-      // browsers enforce CORS by checking the response's ACAO value
-      // against their OWN origin, so a mismatched echoed value still gets
-      // blocked client-side. But it means curl (which doesn't enforce
-      // CORS at all) sees an ACAO header on every request including ones
-      // from a disallowed origin, which reads as "not rejecting" even
-      // though it's harmless. A callback makes the allow-list explicit and
-      // means only a genuinely matching Origin ever gets the header back.
+      // An explicit allow-list: only a matching Origin gets
+      // Access-Control-Allow-Origin back. Requests without an Origin header
+      // (curl, server-to-server, health checks) aren't cross-origin browser
+      // requests, so CORS doesn't apply to them.
       origin(origin, callback) {
-        // No Origin header at all (curl, server-to-server, health checks)
-        // isn't a browser cross-origin request in the first place - CORS
-        // doesn't apply, so let it through.
-        if (!origin || origin === env.CLIENT_URL) {
+        if (!origin || env.CLIENT_URL.includes(origin)) {
           return callback(null, true);
         }
         callback(new ApiError(403, "Not allowed by CORS"));
@@ -56,6 +53,7 @@ export function createApp() {
   app.use(apiLimiter);
 
   app.use("/api/health", healthRoutes);
+  app.use("/api/config", configRoutes);
   app.use("/api/auth", authRoutes);
   app.use("/api/bookings", bookingRoutes);
   app.use("/api/providers", providerRoutes);

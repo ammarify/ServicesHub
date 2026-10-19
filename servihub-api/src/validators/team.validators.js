@@ -1,12 +1,19 @@
 import { z } from "zod";
-import { objectIdSchema } from "./common.js";
+import { ROLES } from "../models/User.js";
+import { emailSchema, objectIdSchema, personNameSchema } from "./common.js";
 
 export const teamMemberIdParamsSchema = z.object({
   id: objectIdSchema,
 });
 
+export const createTeamMemberBodySchema = z.object({
+  name: personNameSchema,
+  email: emailSchema,
+  role: z.enum(ROLES),
+});
+
 export const updateTeamMemberRoleBodySchema = z.object({
-  role: z.enum(["super_admin", "manager", "support_agent", "finance"]),
+  role: z.enum(ROLES),
 });
 
 export const updateTeamMemberStatusBodySchema = z.object({

@@ -1,18 +1,25 @@
 import { ShieldAlert } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
+import { useAuth } from "../../context/AuthContext";
+import { roleLabel } from "../settings/roles";
+import { ErrorState } from "./ErrorState";
 
 export function ForbiddenPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-      <ShieldAlert size={28} className="text-text-secondary" />
-      <h1 className="text-[20px] font-semibold text-text-primary">Access denied</h1>
-      <p className="text-[13px] text-text-secondary">You don't have access to this area.</p>
-      <Button variant="primary" className="mt-2" onClick={() => navigate("/dashboard")}>
-        Back to Dashboard
-      </Button>
-    </div>
+    <ErrorState
+      icon={ShieldAlert}
+      code="Error 403"
+      title="Access denied"
+      description={`The ${roleLabel(user?.role)} role can't open this page. If your work needs it, ask a Super Admin to change your role in Settings.`}
+      actions={
+        <Button variant="primary" onClick={() => navigate("/dashboard")}>
+          Back to Dashboard
+        </Button>
+      }
+    />
   );
 }

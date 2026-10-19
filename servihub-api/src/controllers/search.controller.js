@@ -1,42 +1,40 @@
 import { Booking, Customer, Ticket } from "../models/index.js";
+import { hasPermission } from "../middleware/rbac.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { escapeRegex } from "../utils/regex.js";
 
 const RESULT_LIMIT = 5;
 
-// Mirrors the *.read rows in middleware/rbac.js. Search must not leak a
-// customer/ticket match to a role that couldn't read that resource
-// directly through its own list endpoint (e.g. finance has no
-// customer.read) - each branch below is skipped entirely for a role
-// that isn't allowed to see it, rather than filtered out after the fact.
-const RESOURCE_ROLES = {
-  bookings: ["super_admin", "manager", "support_agent", "finance"],
-  customers: ["super_admin", "manager"],
-  tickets: ["super_admin", "manager", "support_agent"],
-};
-
+// Each resource is only searched when the caller's role can read it through
+// its own endpoint (e.g. finance has no customer.read), so search never
+// leaks a match a role couldn't otherwise see.
 export const search = asyncHandler(async (req, res) => {
-  const { q } = req.query;
+  const q = req.query.q;
 
   if (!q) {
     return res.status(200).json({ bookings: [], customers: [], tickets: [] });
   }
 
-  // Anchored to the start of the field so the query can use the indexed
-  // field (code/name) for a bounded scan - a "contains anywhere" pattern
-  // can't use an index regardless of case-insensitivity.
-  const prefix = new RegExp("^" + escapeRegex(q), "i");
+  const escaped = escapeRegex(q);
+  // Anchored prefix match so the code/name indexes can be used. A bare
+  // number ("4801") also finds "BK-4801"/"TK-4801".
+  const prefix = new RegExp(`^${escaped}`, "i");
+  const codeMatch = /^\d+$/.test(q) ? new RegExp(`^[A-Z]+-${escaped}`, "i") : prefix;
   const role = req.user.role;
 
   const [bookings, customers, tickets] = await Promise.all([
-    RESOURCE_ROLES.bookings.includes(role)
-      ? Booking.find({ code: prefix }).limit(RESULT_LIMIT).select("code service status scheduledAt")
+    hasPermission(role, "booking.read")
+      ? Booking.find({ code: codeMatch }).limit(RESULT_LIMIT).select("code service status scheduledAt")
       : [],
-    RESOURCE_ROLES.customers.includes(role)
-      ? Customer.find({ name: prefix }).limit(RESULT_LIMIT).select("name phone area")
+    hasPermission(role, "customer.read")
+      ? Customer.find({ $or: [{ name: prefix }, { phone: new RegExp(escaped) }] })
+          .limit(RESULT_LIMIT)
+          .select("name phone area")
       : [],
-    RESOURCE_ROLES.tickets.includes(role)
-      ? Ticket.find({ code: prefix }).limit(RESULT_LIMIT).select("code subject status priority")
+    hasPermission(role, "ticket.read")
+      ? Ticket.find({ $or: [{ code: codeMatch }, { subject: prefix }] })
+          .limit(RESULT_LIMIT)
+          .select("code subject status priority")
       : [],
   ]);
 

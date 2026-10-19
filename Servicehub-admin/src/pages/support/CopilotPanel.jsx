@@ -1,15 +1,18 @@
-import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, ShieldCheck, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { RequestRefundDialog } from "../../components/refunds/RequestRefundDialog";
 import { Button } from "../../components/ui/Button";
 import { QueryError } from "../../components/ui/QueryError";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { StatusBadge } from "../../components/ui/StatusBadge";
-import { useReassignBooking } from "../../hooks/useBookings";
-import { useProviders } from "../../hooks/useProviders";
+import { useAuth } from "../../context/AuthContext";
+import { useToast } from "../../context/ToastContext";
+import { useAppConfig } from "../../hooks/useConfig";
 import { useAnalyzeTicket, useUpdateTicketPriority } from "../../hooks/useTickets";
-import { relativeTime } from "../../lib/formatters";
+import { errorMessage } from "../../lib/api";
+import { formatUSD, relativeTime } from "../../lib/formatters";
+import { can } from "../../lib/permissions";
 import { ReassignProviderDialog } from "../bookings/ReassignProviderDialog";
-import { RequestRefundDialog } from "./RequestRefundDialog";
 
 const ACTION_LABELS = {
   request_refund: "Request refund",
@@ -17,48 +20,49 @@ const ACTION_LABELS = {
   escalate: "Escalate to high priority",
 };
 
-export function CopilotPanel({
-  ticket,
-  onInsertReply,
-  collapsible = false,
-  isCollapsed = false,
-  onToggleCollapse,
-}) {
-  const [isReassignOpen, setIsReassignOpen] = useState(false);
-  const [isRefundOpen, setIsRefundOpen] = useState(false);
-  const [reassignError, setReassignError] = useState("");
+const OPEN_BOOKING_STATUSES = ["pending", "assigned"];
+
+function SectionLabel({ children }) {
+  return <div className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">{children}</div>;
+}
+
+export function CopilotPanel({ ticket, onInsertReply, collapsible = false, isCollapsed = false, onToggleCollapse }) {
+  const { user } = useAuth();
+  const toast = useToast();
+  const { aiEnabled } = useAppConfig();
+  const [openDialog, setOpenDialog] = useState(null);
 
   const analyzeMutation = useAnalyzeTicket(ticket._id);
   const priorityMutation = useUpdateTicketPriority(ticket._id);
-  const reassignMutation = useReassignBooking(ticket.booking?._id);
-  const providersQuery = useProviders({ service: ticket.booking?.service, limit: 50 });
-
-  const reassignCandidates = useMemo(() => {
-    const allProviders = providersQuery.data?.items ?? [];
-    return allProviders.filter((p) => p._id !== ticket.booking?.provider?._id);
-  }, [providersQuery.data, ticket.booking?.provider?._id]);
 
   const analysis = ticket.aiAnalysis;
   const isLoading = analyzeMutation.isPending;
   const isError = analyzeMutation.isError && !isLoading;
+  // A rejected API key or model needs an administrator, not another try.
+  const canRetry = analyzeMutation.error?.response?.data?.code !== "AI_MISCONFIGURED";
   const isEscalated = ticket.priority === "high";
+  const booking = ticket.booking;
 
-  function handleAnalyze() {
-    analyzeMutation.mutate();
+  // Only offer what this person can actually do, for this booking right now
+  // (the API would refuse the rest).
+  function isActionAvailable(action) {
+    if (action === "request_refund") return can(user, "refund.request");
+    if (action === "reassign_provider") {
+      return can(user, "booking.reassign") && booking && OPEN_BOOKING_STATUSES.includes(booking.status);
+    }
+    if (action === "escalate") return can(user, "ticket.resolve");
+    return false;
   }
 
   function handleAction(action) {
-    if (action === "reassign_provider") setIsReassignOpen(true);
-    if (action === "request_refund") setIsRefundOpen(true);
-    if (action === "escalate") priorityMutation.mutate("high");
-  }
-
-  function handleReassign(providerId) {
-    setReassignError("");
-    reassignMutation.mutate(providerId, {
-      onSuccess: () => setIsReassignOpen(false),
-      onError: (error) => setReassignError(error.response?.data?.message ?? "Couldn't reassign this booking."),
-    });
+    if (action === "reassign_provider") setOpenDialog("reassign");
+    if (action === "request_refund") setOpenDialog("refund");
+    if (action === "escalate") {
+      priorityMutation.mutate("high", {
+        onSuccess: () => toast.success(`${ticket.code} escalated to high priority.`),
+        onError: (error) => toast.error(errorMessage(error)),
+      });
+    }
   }
 
   if (collapsible && isCollapsed) {
@@ -77,13 +81,16 @@ export function CopilotPanel({
     );
   }
 
-  const visibleActions = analysis?.suggestedActions.filter((a) => a !== "no_action") ?? [];
-  const refundPercent = analysis?.refundEligibility.percent ?? 0;
-  const bookingAmount = ticket.booking?.amount ?? 0;
-  const suggestedRefundAmount = Math.round((bookingAmount * refundPercent) / 100);
+  const visibleActions = (analysis?.suggestedActions ?? []).filter(
+    (action) => action !== "no_action" && isActionAvailable(action)
+  );
+  const refundPercent = analysis?.refundEligibility?.percent ?? 0;
+  const bookingAmount = booking?.amount ?? 0;
+  const suggestedRefundAmount = Math.round(((bookingAmount * refundPercent) / 100) * 100) / 100;
+  const guardrails = analysis?.guardrails ?? [];
 
   return (
-    <div className="flex h-full w-80 shrink-0 flex-col border-l border-border bg-surface">
+    <div className="flex h-full w-full shrink-0 flex-col border-l border-border bg-surface min-[1100px]:w-80">
       <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3.5">
         <div className="flex items-center gap-1.5">
           <Sparkles size={13} className="text-accent" />
@@ -104,23 +111,33 @@ export function CopilotPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        <Button
-          variant="secondary"
-          className="w-full justify-center"
-          onClick={handleAnalyze}
-          disabled={isLoading}
-        >
-          {isLoading ? "Analyzing…" : analysis ? "Re-analyze" : "Analyze"}
-        </Button>
+        {!aiEnabled ? (
+          <div className="rounded-card border border-dashed border-border p-4 text-center">
+            <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent" aria-hidden="true">
+              <Sparkles size={18} />
+            </span>
+            <p className="mt-3 text-[13px] font-medium text-text-primary">Copilot isn't set up yet</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-text-secondary">
+              The AI Copilot isn't configured on this server. Ask an administrator to add a Groq API key (
+              <span className="font-data">GROQ_API_KEY</span>) to enable ticket analysis.
+            </p>
+          </div>
+        ) : (
+          <>
+            <Button variant="secondary" className="w-full justify-center" onClick={() => analyzeMutation.mutate()} disabled={isLoading}>
+              {isLoading ? "Analyzing…" : analysis ? "Re-analyze" : "Analyze"}
+            </Button>
 
-        {analysis && !isLoading && (
-          <p className="mt-2 text-center text-[11px] text-text-secondary">
-            Last analyzed <span className="font-data">{relativeTime(analysis.analyzedAt)}</span>
-          </p>
+            {analysis && !isLoading && (
+              <p className="mt-2 text-center text-[11px] text-text-secondary">
+                Last analyzed <span className="font-data">{relativeTime(analysis.analyzedAt)}</span>
+              </p>
+            )}
+          </>
         )}
 
         {isLoading && (
-          <div className="mt-5 flex flex-col gap-5">
+          <div className="mt-5 flex flex-col gap-5" aria-busy="true">
             <div className="flex flex-col gap-1.5">
               <Skeleton className="h-3 w-20" />
               <Skeleton className="h-3 w-full" />
@@ -144,64 +161,74 @@ export function CopilotPanel({
         {isError && (
           <QueryError
             className="mt-5"
-            message={analyzeMutation.error?.response?.data?.message ?? "Analysis failed. Please try again."}
-            onRetry={handleAnalyze}
+            message={errorMessage(analyzeMutation.error, "Analysis failed. Please try again.")}
+            onRetry={canRetry ? () => analyzeMutation.mutate() : undefined}
           />
         )}
 
         {analysis && !isLoading && !isError && (
           <div className="mt-5 flex flex-col gap-5">
             <section>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                Summary
-              </div>
+              <SectionLabel>Summary</SectionLabel>
               <p className="mt-1.5 text-[13px] leading-relaxed text-text-primary">{analysis.summary}</p>
             </section>
 
             <section>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                Sentiment
-              </div>
+              <SectionLabel>Sentiment</SectionLabel>
               <div className="mt-1.5">
                 <StatusBadge status={analysis.sentiment} />
               </div>
             </section>
 
             <section>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                Refund Eligibility
-              </div>
+              <SectionLabel>Refund Eligibility</SectionLabel>
               <p className="mt-1.5 text-[13px] font-medium text-text-primary">
-                {analysis.refundEligibility.eligible
-                  ? `Eligible — ${analysis.refundEligibility.percent}%`
-                  : "Not eligible"}
+                {analysis.refundEligibility.eligible ? (
+                  <>
+                    Eligible — <span className="font-data">{analysis.refundEligibility.percent}%</span>
+                    {bookingAmount > 0 && (
+                      <span className="font-data text-text-secondary"> ({formatUSD(suggestedRefundAmount)})</span>
+                    )}
+                  </>
+                ) : (
+                  "Not eligible"
+                )}
               </p>
-              <p className="font-data mt-0.5 text-[11px] text-text-secondary">
-                {analysis.refundEligibility.reason}
-              </p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-text-secondary">{analysis.refundEligibility.reason}</p>
+              {guardrails.length > 0 && (
+                <div className="mt-2 rounded-card border border-border bg-canvas px-3 py-2">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                    <ShieldCheck size={12} className="text-success" />
+                    Adjusted by policy checks
+                  </div>
+                  <ul className="mt-1 flex list-disc flex-col gap-0.5 pl-4 text-[12px] leading-relaxed text-text-secondary">
+                    {guardrails.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
 
             <section>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                Suggested Reply
-              </div>
-              <blockquote className="mt-1.5 rounded-card border border-border bg-canvas px-3 py-2 text-[13px] leading-relaxed text-text-primary">
+              <SectionLabel>Suggested Reply</SectionLabel>
+              <blockquote className="mt-1.5 whitespace-pre-wrap rounded-card border border-border bg-canvas px-3 py-2 text-[13px] leading-relaxed text-text-primary">
                 {analysis.suggestedReply}
               </blockquote>
-              <Button
-                variant="ghost"
-                className="mt-2 w-full justify-center"
-                onClick={() => onInsertReply(analysis.suggestedReply)}
-              >
-                Insert into composer
-              </Button>
+              {can(user, "ticket.reply") && (
+                <Button
+                  variant="ghost"
+                  className="mt-2 w-full justify-center"
+                  onClick={() => onInsertReply(analysis.suggestedReply)}
+                >
+                  Insert into composer
+                </Button>
+              )}
             </section>
 
             {visibleActions.length > 0 && (
               <section>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                  Actions
-                </div>
+                <SectionLabel>Actions</SectionLabel>
                 <div className="mt-1.5 flex flex-col gap-2">
                   {visibleActions.map((action) => (
                     <Button
@@ -220,11 +247,22 @@ export function CopilotPanel({
           </div>
         )}
 
-        {!analysis && !isLoading && !isError && (
-          <p className="mt-5 text-[13px] leading-relaxed text-text-secondary">
-            Run analysis to see a sentiment read, refund recommendation, and a suggested reply for
-            this ticket.
-          </p>
+        {aiEnabled && !analysis && !isLoading && !isError && (
+          <div className="mt-5">
+            <p className="text-[13px] leading-relaxed text-text-secondary">Analyze this ticket to get:</p>
+            <ul className="mt-2 flex flex-col gap-2">
+              {[
+                "A short summary and how the customer feels",
+                "Refund eligibility checked against your policy",
+                "A reply you can edit before sending",
+              ].map((text) => (
+                <li key={text} className="flex items-start gap-2 text-[13px] text-text-primary">
+                  <Sparkles size={13} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+                  {text}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 
@@ -232,27 +270,17 @@ export function CopilotPanel({
         <p className="text-[11px] text-text-secondary">Copilot suggestions require agent review.</p>
       </div>
 
-      <ReassignProviderDialog
-        open={isReassignOpen}
-        onClose={() => {
-          setIsReassignOpen(false);
-          setReassignError("");
-        }}
-        candidates={reassignCandidates}
-        onSelect={handleReassign}
-        isSubmitting={reassignMutation.isPending}
-        error={reassignError}
-      />
-
-      {ticket.booking && (
-        <RequestRefundDialog
-          open={isRefundOpen}
-          onClose={() => setIsRefundOpen(false)}
-          bookingId={ticket.booking._id}
-          maxAmount={bookingAmount}
-          defaultAmount={suggestedRefundAmount}
-          defaultReason={analysis?.refundEligibility.reason ?? ""}
-        />
+      {booking && (
+        <>
+          <ReassignProviderDialog open={openDialog === "reassign"} booking={booking} onClose={() => setOpenDialog(null)} />
+          <RequestRefundDialog
+            open={openDialog === "refund"}
+            bookingId={booking._id}
+            defaultAmount={suggestedRefundAmount || undefined}
+            defaultReason={analysis?.refundEligibility?.reason ?? ""}
+            onClose={() => setOpenDialog(null)}
+          />
+        </>
       )}
     </div>
   );

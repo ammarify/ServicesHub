@@ -28,6 +28,9 @@ const aiAnalysisSchema = new Schema(
     refundEligibility: refundEligibilitySchema,
     suggestedReply: String,
     suggestedActions: [String],
+    // Server-side policy checks that changed the model's answer, e.g.
+    // "Refund capped at 50% (Section 3 maximum)". Empty when nothing changed.
+    guardrails: { type: [String], default: undefined },
     analyzedAt: Date,
   },
   { _id: false }
@@ -36,8 +39,8 @@ const aiAnalysisSchema = new Schema(
 const ticketSchema = new Schema(
   {
     code: { type: String, required: true, unique: true },
-    booking: { type: Schema.Types.ObjectId, ref: "Booking", required: true },
-    customer: { type: Schema.Types.ObjectId, ref: "Customer", required: true },
+    booking: { type: Schema.Types.ObjectId, ref: "Booking", required: true, index: true },
+    customer: { type: Schema.Types.ObjectId, ref: "Customer", required: true, index: true },
     subject: { type: String, required: true },
     priority: { type: String, enum: ["low", "medium", "high"], required: true },
     status: {
@@ -51,5 +54,7 @@ const ticketSchema = new Schema(
   },
   { timestamps: true, versionKey: false }
 );
+
+ticketSchema.index({ updatedAt: -1 });
 
 export const Ticket = mongoose.model("Ticket", ticketSchema);

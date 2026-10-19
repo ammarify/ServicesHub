@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { objectIdSchema, paginationSchema } from "./common.js";
+import { moneySchema, objectIdSchema, paginationSchema } from "./common.js";
 
 export const listRefundsQuerySchema = paginationSchema.extend({
   status: z.enum(["pending", "approved", "rejected"]).optional(),
+  bookingId: objectIdSchema.optional(),
 });
 
 export const refundIdParamsSchema = z.object({
@@ -11,10 +12,11 @@ export const refundIdParamsSchema = z.object({
 
 export const createRefundBodySchema = z.object({
   bookingId: objectIdSchema,
-  amount: z.coerce.number().positive(),
-  reason: z.string().trim().min(1).max(500),
+  amount: moneySchema,
+  reason: z.string().trim().min(1, "Reason is required").max(500),
 });
 
 export const refundDecisionBodySchema = z.object({
   decision: z.enum(["approved", "rejected"]),
+  note: z.string().trim().max(500).optional(),
 });

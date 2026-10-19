@@ -2,7 +2,8 @@ import clsx from "clsx";
 import { Search } from "lucide-react";
 import { Input } from "../../components/ui/Input";
 import { Toolbar } from "../../components/ui/Toolbar";
-import { SERVICE_OPTIONS, STATUS_OPTIONS } from "./useBookingsList";
+import { useAppConfig } from "../../hooks/useConfig";
+import { STATUS_OPTIONS } from "./useBookingsList";
 
 const STATUS_LABELS = {
   all: "All",
@@ -20,8 +21,10 @@ export function BookingsToolbar({
   setStatusFilter,
   serviceFilter,
   setServiceFilter,
-  totalCount,
+  actions,
 }) {
+  const { services } = useAppConfig();
+
   return (
     <Toolbar className="justify-between">
       <div className="flex flex-wrap items-center gap-3">
@@ -34,16 +37,18 @@ export function BookingsToolbar({
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search by ID or customer..."
+            aria-label="Search bookings"
             className="w-56 pl-8"
           />
         </div>
 
-        <div className="inline-flex rounded-btn border border-border bg-canvas p-0.5">
+        <div className="inline-flex flex-wrap rounded-btn border border-border bg-canvas p-0.5" role="group" aria-label="Filter by status">
           {STATUS_OPTIONS.map((status) => (
             <button
               key={status}
               type="button"
               onClick={() => setStatusFilter(status)}
+              aria-pressed={statusFilter === status}
               className={clsx(
                 "rounded-btn px-2.5 py-1 text-[13px] transition-colors",
                 statusFilter === status
@@ -59,19 +64,19 @@ export function BookingsToolbar({
         <select
           value={serviceFilter}
           onChange={(event) => setServiceFilter(event.target.value)}
+          aria-label="Filter by service"
           className="h-9 rounded-card border border-border bg-surface px-3 text-[13px] text-text-primary"
         >
-          {SERVICE_OPTIONS.map((service) => (
+          <option value="all">All Services</option>
+          {services.map((service) => (
             <option key={service} value={service}>
-              {service === "all" ? "All Services" : service}
+              {service}
             </option>
           ))}
         </select>
       </div>
 
-      <div className="text-[13px] text-text-secondary">
-        <span className="font-data text-text-primary">{totalCount}</span> bookings
-      </div>
+      {actions && <div className="flex items-center gap-3">{actions}</div>}
     </Toolbar>
   );
 }

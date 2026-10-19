@@ -1,21 +1,28 @@
-const NAV_VISIBILITY = {
-  super_admin: ["/dashboard", "/bookings", "/support", "/refunds", "/providers", "/customers", "/settings"],
-  manager: ["/dashboard", "/bookings", "/support", "/refunds", "/providers", "/customers"],
-  support_agent: ["/dashboard", "/bookings", "/support", "/refunds"],
-  finance: ["/dashboard", "/bookings", "/refunds"],
-};
+// Permission checks for UI visibility only - the API enforces every one of
+// these itself. The signed-in user's permission list comes from the API
+// (GET /auth/me and every login response), generated from
+// servihub-api/src/middleware/rbac.js, so there is no second copy of the
+// role matrix to keep in sync here.
 
-export function canViewPath(role, path) {
-  const allowed = NAV_VISIBILITY[role] ?? [];
-  return allowed.some((allowedPath) => path === allowedPath || path.startsWith(`${allowedPath}/`));
+export function can(user, permission) {
+  return Boolean(user?.permissions?.includes(permission));
 }
 
-const ACTION_PERMISSIONS = {
-  "refund.approve": ["super_admin", "manager", "finance"],
-  "booking.reassign": ["super_admin", "manager"],
-  "team.manage": ["super_admin"],
+// Which permission each top-level page needs. Pages not listed (e.g. the
+// personal /account page) are open to every signed-in user.
+export const PAGE_PERMISSIONS = {
+  "/dashboard": "dashboard.read",
+  "/bookings": "booking.read",
+  "/support": "ticket.read",
+  "/refunds": "refund.read",
+  "/providers": "provider.read",
+  "/customers": "customer.read",
+  "/settings": "team.manage",
 };
 
-export function can(role, action) {
-  return ACTION_PERMISSIONS[action]?.includes(role) ?? false;
+// Prefix match, so "/bookings/64f..." is checked against "/bookings".
+export function canViewPath(user, path) {
+  const page = Object.keys(PAGE_PERMISSIONS).find((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+  if (!page) return true;
+  return can(user, PAGE_PERMISSIONS[page]);
 }

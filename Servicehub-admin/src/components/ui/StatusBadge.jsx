@@ -21,6 +21,9 @@ const STATUS_TONE = {
   angry: "danger",
   active: "success",
   disabled: "danger",
+  invited: "warning",
+  verified: "success",
+  unverified: "warning",
 };
 
 const DOT_CLASSES = {
@@ -44,7 +47,8 @@ export function StatusBadge({ status }) {
     <span className="inline-flex items-center gap-1.5">
       <span className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", DOT_CLASSES[tone])} />
       <span className={clsx("font-data text-[11px] uppercase tracking-wide", TEXT_CLASSES[tone])}>
-        {status}
+        {/* "in_progress" reads as IN PROGRESS, not IN_PROGRESS */}
+        {String(status ?? "").replace(/_/g, " ")}
       </span>
     </span>
   );
