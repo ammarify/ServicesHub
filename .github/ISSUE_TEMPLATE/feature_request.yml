@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement or a new capability.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Who runs into it, and how they work around it today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: dropdown
+    id: roles
+    attributes:
+      label: Which roles would use it?
+      multiple: true
+      options:
+        - Super Admin
+        - Manager
+        - Support Agent
+        - Finance
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
