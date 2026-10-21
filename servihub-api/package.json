@@ -19,8 +19,8 @@
         "create-admin": "node scripts/create-admin.mjs"
     },
     "keywords": [],
-    "author": "",
-    "license": "UNLICENSED",
+    "author": "Ammar",
+    "license": "MIT",
     "dependencies": {
         "bcryptjs": "^3.0.3",
         "cookie-parser": "^1.4.7",
