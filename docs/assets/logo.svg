@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30">
+  <style>
+    .solid { fill: #2563EB; }
+    .outline { fill: none; stroke: #2563EB; stroke-width: 2; }
+    @media (prefers-color-scheme: dark) {
+      .solid { fill: #3B82F6; }
+      .outline { stroke: #3B82F6; }
+    }
+  </style>
+  <rect class="solid" x="2" y="2" width="16" height="16" rx="4" />
+  <rect class="outline" x="12" y="12" width="16" height="16" rx="4" />
+</svg>
