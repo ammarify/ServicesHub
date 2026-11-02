@@ -264,26 +264,34 @@ export function LoginPage() {
           </button>
 
           {showDemoAccess && (
-            <div id="demo-access" className="grid grid-cols-1 gap-2 border-t border-border p-3 min-[360px]:grid-cols-2">
-              {DEMO_ACCOUNTS.map(({ role, label, description, icon: Icon }) => (
-                <button
-                  key={role}
-                  type="button"
-                  onClick={() => handleDemoLogin(role)}
-                  disabled={demoLoadingRole !== null}
-                  className="group flex items-start gap-2.5 rounded-card border border-border bg-surface p-2.5 text-left transition-colors hover:border-accent/40 hover:bg-accent/5 disabled:opacity-50 short:py-2"
-                >
-                  <span className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-btn bg-accent/10 text-accent min-[400px]:flex">
-                    <Icon size={14} />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[13px] font-medium text-text-primary">
-                      {demoLoadingRole === role ? "Signing in…" : label}
+            <div id="demo-access" className="border-t border-border p-3">
+              <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
+                {DEMO_ACCOUNTS.map(({ role, label, description, icon: Icon }) => (
+                  <button
+                    key={role}
+                    type="button"
+                    onClick={() => handleDemoLogin(role)}
+                    disabled={demoLoadingRole !== null}
+                    className="group flex items-start gap-2.5 rounded-card border border-border bg-surface p-2.5 text-left transition-colors hover:border-accent/40 hover:bg-accent/5 disabled:opacity-50 short:py-2"
+                  >
+                    <span className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-btn bg-accent/10 text-accent min-[400px]:flex">
+                      <Icon size={14} />
                     </span>
-                    <span className="block text-[11px] leading-snug text-text-secondary shorter:hidden">{description}</span>
-                  </span>
-                </button>
-              ))}
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-medium text-text-primary">
+                        {demoLoadingRole === role ? "Signing in…" : label}
+                      </span>
+                      <span className="block text-[11px] leading-snug text-text-secondary shorter:hidden">{description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {config.demoResetHours > 0 && (
+                <p className="mt-2.5 text-[12px] leading-snug text-text-secondary shorter:hidden">
+                  Everyone shares this demo, so its data resets every{" "}
+                  {config.demoResetHours === 1 ? "hour" : `${config.demoResetHours} hours`}.
+                </p>
+              )}
             </div>
           )}
         </div>

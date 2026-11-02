@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { PasswordToken, Session, User } from "../models/index.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { assertNotLockedDemoAccount } from "../utils/demoLock.js";
 import { endAllSessions } from "../services/session.service.js";
 import { buildPasswordLink, createPasswordToken } from "../services/passwordToken.service.js";
 import { inviteEmail, isEmailConfigured, sendEmail } from "../services/email.service.js";
@@ -86,6 +87,8 @@ export const resendTeamInvite = asyncHandler(async (req, res) => {
   if (member.status !== "active") {
     throw new ApiError(409, "Enable this member before sending an invitation.");
   }
+  // An invitation link sets a new password, which a shared account must keep.
+  assertNotLockedDemoAccount(member, `${member.name} is a shared demo account, so it can't get an invitation link.`);
 
   const invite = await issueInvite(member, req.user.name ?? "An administrator");
   res.status(200).json({ member, ...invite });
@@ -93,6 +96,10 @@ export const resendTeamInvite = asyncHandler(async (req, res) => {
 
 export const updateTeamMemberRole = asyncHandler(async (req, res) => {
   const member = await loadOtherMember(req, "role");
+  assertNotLockedDemoAccount(
+    member,
+    `${member.name} is a shared demo account, so their role can't be changed. Invite a new member to try role changes.`
+  );
 
   if (member.role === req.body.role) {
     return res.status(200).json({ member });
@@ -112,6 +119,10 @@ export const updateTeamMemberRole = asyncHandler(async (req, res) => {
 
 export const updateTeamMemberStatus = asyncHandler(async (req, res) => {
   const member = await loadOtherMember(req, "status");
+  assertNotLockedDemoAccount(
+    member,
+    `${member.name} is a shared demo account, so it can't be disabled. Invite a new member to try disabling an account.`
+  );
 
   if (member.status === req.body.status) {
     return res.status(200).json({ member });

@@ -76,6 +76,7 @@ export function mockApi(routes = {}) {
 
 export const TEST_CONFIG = {
   demoMode: false,
+  demoResetHours: null,
   googleClientId: null,
   aiEnabled: true,
   emailEnabled: false,

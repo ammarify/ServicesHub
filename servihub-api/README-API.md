@@ -27,6 +27,7 @@ and `limit` (default 20, max 50).
 | `ACCOUNT_DISABLED` | 401/403 | An administrator disabled the account. |
 | `INVALID_CREDENTIALS` | 401 | Wrong email or password (same answer for both). |
 | `FORBIDDEN` | 403 | Signed in, but the role lacks the permission. |
+| `DEMO_LOCKED` | 403 | While DEMO_MODE is on, the seeded accounts every visitor shares keep their password, name, role and status, and can't "log out everywhere". |
 | `FEATURE_DISABLED` | 503 | An optional integration (Groq, Google) isn't configured. |
 | `AI_MISCONFIGURED` | 503 | Groq rejected the Copilot's API key or model (for example a retired model). An administrator has to fix `GROQ_API_KEY` / `GROQ_MODEL`; retrying won't help. |
 | `AI_RATE_LIMITED` | 503 | The Groq account's rate limit was reached. Comes with `Retry-After` (seconds). |
@@ -50,8 +51,15 @@ while the database is unreachable.
 
 ### `GET /config`
 Runtime settings the sign-in page needs before anyone is signed in:
-`{ demoMode, googleClientId, aiEnabled, emailEnabled, services, timezone }`.
-`services` is the service catalogue every form and filter uses.
+`{ demoMode, demoResetHours, googleClientId, aiEnabled, emailEnabled, services, timezone }`.
+`services` is the service catalogue every form and filter uses;
+`demoResetHours` is how often a public demo's data is replaced
+(`DEMO_RESET_HOURS`), or `null`.
+
+### `GET /health/client`
+Deployment aid, 404 unless `DEBUG_PROXY_HEADERS` is on:
+`{ ip, trustProxy, forwardedFor, realIp }`, the client address as the API
+sees it next to the raw proxy headers, for setting `TRUST_PROXY`.
 
 ---
 
@@ -65,7 +73,7 @@ Runtime settings the sign-in page needs before anyone is signed in:
 | POST | `/refresh` | `refreshLimiter` | Uses the `sh_refresh` cookie. Rotates the refresh token (single use) and sets new cookies → `{ user }`. 401 `SESSION_EXPIRED` / `SESSION_REVOKED`. |
 | POST | `/logout` | — | Revokes this device's session (its refresh **and** access token stop working) and clears the cookies. |
 | POST | `/logout-all` | signed in | Ends every session of the user on every device. |
-| GET | `/me` | signed in | `{ user: { id, name, email, role, status, permissions } }` |
+| GET | `/me` | signed in | `{ user: { id, name, email, role, status, permissions, demoAccount } }`. `demoAccount` marks a seeded account (see `DEMO_LOCKED`). |
 | PATCH | `/me` | signed in | `{ name }` → `{ user }` |
 | POST | `/change-password` | signed in, `authLimiter` | `{ currentPassword, newPassword }`. Signs out every other device; this one gets fresh cookies. Passwords: 8–128 chars with a letter and a number. |
 | POST | `/forgot-password` | `passwordResetLimiter` | `{ email }`. Always the same 200 answer; emails a 1-hour single-use link when the account exists and is active. |

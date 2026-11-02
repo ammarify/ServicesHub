@@ -227,8 +227,10 @@ ones you are most likely to touch:
 | `GOOGLE_CLIENT_ID` | no | "Sign in with Google" for existing staff |
 | `RESEND_API_KEY`, `EMAIL_FROM` | no | Invitation and password-reset emails |
 | `DEMO_MODE` | no | Demo sign-in and the customer simulator; on by default outside production |
+| `DEMO_RESET_HOURS` | no | Public demos only: replaces all data with fresh demo data every so many hours |
 
-The web app needs a single variable, `VITE_API_URL`, the API's base URL.
+The web app has a single setting, `VITE_API_URL`: the API's full URL, or
+unset to call `/api` on the app's own site (see [Deployment](#deployment)).
 
 ## Testing
 
@@ -264,6 +266,53 @@ pull request, and CodeQL scans the code every week.
 
 ## Deployment
 
+### Public demo on free hosting
+
+The live demo runs on three free tiers: the web app on Vercel, the API on
+Render and the database on MongoDB Atlas. Vercel forwards `/api` and
+`/socket.io` to the API ([`vercel.json`](Servicehub-admin/vercel.json)), so
+the browser talks to one site and the session cookies stay first-party.
+Without that, sign-in would fail: `*.vercel.app` and `*.onrender.com` are
+different sites, and browsers don't send `SameSite=Lax` cookies between them.
+
+1. **Database.** Create a free M0 cluster on [MongoDB Atlas](https://www.mongodb.com/atlas)
+   (AWS, N. Virginia), add a database user and allow access from anywhere
+   (`0.0.0.0/0`), since free Render instances have no fixed IP. Copy the
+   connection string and put the database name before the `?`:
+   `mongodb+srv://user:password@cluster0.xxxxx.mongodb.net/servihub?retryWrites=true&w=majority`.
+2. **API.** In [Render](https://render.com), choose **New → Blueprint** and
+   select this repository. [`render.yaml`](render.yaml) creates a free web
+   service with demo mode, a 24-hour data reset and generated JWT secrets.
+   Fill in `MONGODB_URI`, `CLIENT_URL` (the web app's address from step 3,
+   such as `https://servihub-admin.vercel.app`) and, for the Copilot,
+   `GROQ_API_KEY`. The demo data loads on the first start, so there is
+   nothing to seed.
+3. **Web app.** In [Vercel](https://vercel.com), import the repository with
+   `Servicehub-admin` as the root directory; Vite is detected and no
+   environment variables are needed. If Render gave the API another address
+   than `servihub-api.onrender.com`, change the two rewrites in `vercel.json`
+   first.
+4. **Check.** Open `https://<web app>/api/health/client`. `ip` should equal
+   `realIp`, your own address; if it doesn't, raise `TRUST_PROXY` until it
+   does, so rate limits count each visitor separately. Then set
+   `DEBUG_PROXY_HEADERS` to `false` in `render.yaml` and sign in with a demo
+   role.
+
+What to expect on the free tiers:
+
+- The API sleeps after 15 minutes without traffic and takes about a minute
+  to wake; the web app says so while it waits. A free uptime monitor calling
+  `https://<api>.onrender.com/api/health` every 10 minutes keeps it awake,
+  and one always-on service fits in Render's 750 free hours a month.
+- Realtime updates use HTTP long-polling, because Vercel doesn't forward
+  WebSockets.
+- Every visitor shares the seeded accounts, so their password, name, role
+  and status can't be changed while `DEMO_MODE` is on, and
+  `DEMO_RESET_HOURS` replaces all data on schedule. Never use either on a
+  database with real data.
+
+### Production
+
 The API runs on any Node.js host; the web app is a static build.
 
 1. Create a production database (MongoDB Atlas works well) and set
@@ -271,12 +320,14 @@ The API runs on any Node.js host; the web app is a static build.
 2. Set `NODE_ENV=production` and leave `DEMO_MODE` unset, which turns off
    demo sign-in and the customer simulator.
 3. Generate new JWT secrets and set `CLIENT_URL` to the web app's URL.
-4. Serve both apps over HTTPS. Sibling domains such as `app.example.com` and
-   `api.example.com` work with the default `COOKIE_SAMESITE=lax`; unrelated
-   domains need `none`.
+4. Serve both apps over HTTPS from one site: a single domain that forwards
+   `/api` and `/socket.io` to the API, as the demo does, or sibling domains
+   such as `app.example.com` and `api.example.com`, which work with the
+   default `COOKIE_SAMESITE=lax`. Unrelated domains need `none`.
 5. Set `TRUST_PROXY` to the number of proxies in front of the API.
-6. Build the web app with `VITE_API_URL` set to the API's public URL;
-   `npm run build` writes the site to `dist/`.
+6. Build the web app with `VITE_API_URL` set to the API's public URL, or
+   unset when the host forwards `/api`; `npm run build` writes the site to
+   `dist/`.
 7. Create the first super admin, then invite everyone else from
    Settings → Team:
 
@@ -314,7 +365,8 @@ memory (see the [roadmap](#roadmap)).
 │       ├── hooks/             data hooks built on TanStack Query
 │       ├── context/           authentication, theme, notifications, toasts
 │       └── lib/               API client, permissions, formatters
-└── docs/                      images used in this README
+├── docs/                      images used in this README
+└── render.yaml                Render Blueprint for the demo API
 ```
 
 ## Documentation

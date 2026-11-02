@@ -4,15 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDismiss } from "../../lib/useDismiss";
 
-function MenuItem({ icon: Icon, label, onSelect, danger }) {
+function MenuItem({ icon: Icon, label, onSelect, danger, disabled }) {
   return (
     <button
       role="menuitem"
       type="button"
       onClick={onSelect}
+      disabled={disabled}
       className={clsx(
-        "flex w-full items-center gap-2 rounded-btn px-2.5 py-2 text-left text-[13px] transition-colors",
-        danger ? "text-danger hover:bg-danger/10" : "text-text-primary hover:bg-canvas"
+        "flex w-full items-center gap-2 rounded-btn px-2.5 py-2 text-left text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        danger ? "text-danger enabled:hover:bg-danger/10" : "text-text-primary enabled:hover:bg-canvas"
       )}
     >
       <Icon size={14} className={danger ? "text-danger" : "text-text-secondary"} />
@@ -23,7 +24,10 @@ function MenuItem({ icon: Icon, label, onSelect, danger }) {
 
 const MENU_HEIGHT_ESTIMATE = 150;
 
-export function TeamRowMenu({ member, onChangeRole, onToggleStatus, onResendInvite, onRevokeInvite }) {
+// `locked`: a seeded demo account that every visitor signs in with. The API
+// refuses role and status changes for it (DEMO_LOCKED), so the menu shows the
+// actions switched off, with the reason.
+export function TeamRowMenu({ member, locked = false, onChangeRole, onToggleStatus, onResendInvite, onRevokeInvite }) {
   const [position, setPosition] = useState(null);
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
@@ -40,7 +44,7 @@ export function TeamRowMenu({ member, onChangeRole, onToggleStatus, onResendInvi
       return;
     }
     const rect = triggerRef.current.getBoundingClientRect();
-    const openUp = window.innerHeight - rect.bottom < MENU_HEIGHT_ESTIMATE;
+    const openUp = window.innerHeight - rect.bottom < MENU_HEIGHT_ESTIMATE + (locked ? 70 : 0);
     setPosition({
       right: window.innerWidth - rect.right,
       ...(openUp ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
@@ -84,9 +88,14 @@ export function TeamRowMenu({ member, onChangeRole, onToggleStatus, onResendInvi
             ref={menuRef}
             role="menu"
             style={{ position: "fixed", ...position }}
-            className="animate-dialog-enter z-40 min-w-[190px] rounded-card border border-border bg-surface p-1 shadow-pop"
+            className="animate-dialog-enter z-40 min-w-[190px] max-w-[240px] rounded-card border border-border bg-surface p-1 shadow-pop"
           >
-            <MenuItem icon={ShieldCheck} label="Change role" onSelect={() => run(onChangeRole)} />
+            {locked && (
+              <p className="px-2.5 pb-1.5 pt-2 text-[12px] leading-snug text-text-secondary">
+                Shared demo account: its role and status stay as they are. Add a member to try these actions.
+              </p>
+            )}
+            <MenuItem icon={ShieldCheck} label="Change role" onSelect={() => run(onChangeRole)} disabled={locked} />
             {isPendingInvite ? (
               <>
                 <MenuItem icon={Send} label="Resend invitation" onSelect={() => run(onResendInvite)} />
@@ -97,9 +106,20 @@ export function TeamRowMenu({ member, onChangeRole, onToggleStatus, onResendInvi
               <>
                 <div className="my-1 h-px bg-border" role="separator" />
                 {member.status === "active" ? (
-                  <MenuItem icon={UserX} label="Disable account" onSelect={() => run(onToggleStatus)} danger />
+                  <MenuItem
+                    icon={UserX}
+                    label="Disable account"
+                    onSelect={() => run(onToggleStatus)}
+                    danger
+                    disabled={locked}
+                  />
                 ) : (
-                  <MenuItem icon={UserCheck} label="Enable account" onSelect={() => run(onToggleStatus)} />
+                  <MenuItem
+                    icon={UserCheck}
+                    label="Enable account"
+                    onSelect={() => run(onToggleStatus)}
+                    disabled={locked}
+                  />
                 )}
               </>
             )}

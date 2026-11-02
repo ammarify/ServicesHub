@@ -1,7 +1,12 @@
 import axios from "axios";
 
+// The API's full URL (http://localhost:5000/api in development), or a path on
+// this site when the host forwards API requests, as vercel.json does. The
+// default /api is that second case.
+export const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: API_BASE_URL,
   withCredentials: true,
 });
 

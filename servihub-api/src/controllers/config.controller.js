@@ -12,6 +12,8 @@ export function getPublicConfig(req, res) {
   res.set("Cache-Control", "public, max-age=60");
   res.status(200).json({
     demoMode: env.DEMO_MODE,
+    // How often a public demo replaces its data, so the sign-in page can say so.
+    demoResetHours: env.DEMO_MODE ? (env.DEMO_RESET_HOURS ?? null) : null,
     googleClientId: env.GOOGLE_CLIENT_ID ?? null,
     aiEnabled: isAiEnabled(),
     emailEnabled: isEmailConfigured(),

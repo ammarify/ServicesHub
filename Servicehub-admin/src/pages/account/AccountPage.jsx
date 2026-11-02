@@ -13,6 +13,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../context/ThemeContext";
 import { useToast } from "../../context/ToastContext";
 import { useChangePassword, useUpdateProfile } from "../../hooks/useAccount";
+import { useAppConfig } from "../../hooks/useConfig";
 import { errorMessage, fieldErrors } from "../../lib/api";
 import { validatePassword } from "../../lib/passwordRules";
 import { ROLE_OPTIONS, roleLabel } from "../settings/roles";
@@ -54,7 +55,9 @@ function AccountHeader() {
   );
 }
 
-function ProfileCard() {
+// `locked`: a seeded demo account that every visitor signs in with, so the
+// API refuses to change its name, password or sessions (DEMO_LOCKED).
+function ProfileCard({ locked }) {
   const { user } = useAuth();
   const toast = useToast();
   const [name, setName] = useState(user.name);
@@ -80,10 +83,22 @@ function ProfileCard() {
 
   return (
     <Card>
-      <CardHeading title="Profile" description="How your name appears to the team and on booking timelines." />
+      <CardHeading
+        title="Profile"
+        description={
+          locked
+            ? "Shared demo accounts keep their name, so the demo looks the same for every visitor."
+            : "How your name appears to the team and on booking timelines."
+        }
+      />
       <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3" noValidate>
         <FormField label="Display name" error={error}>
-          <Input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" />
+          <Input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoComplete="name"
+            disabled={locked}
+          />
         </FormField>
         <InfoList>
           <InfoRow icon={Mail} label="Email" mono>
@@ -94,7 +109,7 @@ function ProfileCard() {
           </InfoRow>
         </InfoList>
         <div>
-          <Button type="submit" variant="primary" disabled={mutation.isPending || name.trim() === user.name}>
+          <Button type="submit" variant="primary" disabled={locked || mutation.isPending || name.trim() === user.name}>
             {mutation.isPending ? "Saving…" : "Save changes"}
           </Button>
         </div>
@@ -151,7 +166,7 @@ function AppearanceCard() {
   );
 }
 
-function PasswordCard() {
+function PasswordCard({ locked }) {
   const toast = useToast();
   const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirm: "" });
   const [errors, setErrors] = useState({});
@@ -190,36 +205,45 @@ function PasswordCard() {
 
   return (
     <Card>
-      <CardHeading title="Password" description="Changing your password signs you out on every other device." />
-      <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3" noValidate>
-        <FormField label="Current password" error={errors.currentPassword}>
-          <Input
-            type="password"
-            autoComplete="current-password"
-            value={form.currentPassword}
-            onChange={update("currentPassword")}
-          />
-        </FormField>
-        <div className="flex flex-col gap-2">
-          <FormField label="New password" hint="At least 8 characters, with a letter and a number." error={errors.newPassword}>
-            <Input type="password" autoComplete="new-password" value={form.newPassword} onChange={update("newPassword")} />
+      <CardHeading
+        title="Password"
+        description={
+          locked
+            ? "Shared demo accounts keep their password, so every visitor can sign in."
+            : "Changing your password signs you out on every other device."
+        }
+      />
+      <form onSubmit={handleSubmit} className="mt-4" noValidate>
+        <fieldset disabled={locked} className="flex min-w-0 flex-col gap-3">
+          <FormField label="Current password" error={errors.currentPassword}>
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={form.currentPassword}
+              onChange={update("currentPassword")}
+            />
           </FormField>
-          <PasswordStrength password={form.newPassword} />
-        </div>
-        <FormField label="Confirm new password" error={errors.confirm}>
-          <Input type="password" autoComplete="new-password" value={form.confirm} onChange={update("confirm")} />
-        </FormField>
-        <div>
-          <Button type="submit" variant="primary" disabled={mutation.isPending}>
-            {mutation.isPending ? "Updating…" : "Update password"}
-          </Button>
-        </div>
+          <div className="flex flex-col gap-2">
+            <FormField label="New password" hint="At least 8 characters, with a letter and a number." error={errors.newPassword}>
+              <Input type="password" autoComplete="new-password" value={form.newPassword} onChange={update("newPassword")} />
+            </FormField>
+            <PasswordStrength password={form.newPassword} />
+          </div>
+          <FormField label="Confirm new password" error={errors.confirm}>
+            <Input type="password" autoComplete="new-password" value={form.confirm} onChange={update("confirm")} />
+          </FormField>
+          <div>
+            <Button type="submit" variant="primary" disabled={mutation.isPending}>
+              {mutation.isPending ? "Updating…" : "Update password"}
+            </Button>
+          </div>
+        </fieldset>
       </form>
     </Card>
   );
 }
 
-function SessionsCard() {
+function SessionsCard({ locked }) {
   const { logoutEverywhere } = useAuth();
   const toast = useToast();
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -240,9 +264,19 @@ function SessionsCard() {
     <Card>
       <CardHeading
         title="Sessions"
-        description="Lost a device or signed in on a shared computer? Sign out everywhere, including this browser."
+        description={
+          locked
+            ? "Turned off for shared demo accounts: it would sign out every visitor using this one."
+            : "Lost a device or signed in on a shared computer? Sign out everywhere, including this browser."
+        }
       />
-      <Button variant="secondary" tone="danger" className="mt-4" onClick={() => setIsConfirmOpen(true)}>
+      <Button
+        variant="secondary"
+        tone="danger"
+        className="mt-4"
+        onClick={() => setIsConfirmOpen(true)}
+        disabled={locked}
+      >
         <LogOut size={14} />
         Sign out everywhere
       </Button>
@@ -272,17 +306,21 @@ function SessionsCard() {
 }
 
 export function AccountPage() {
+  const { user } = useAuth();
+  const { demoMode } = useAppConfig();
+  const locked = Boolean(demoMode && user.demoAccount);
+
   return (
     <div className="flex flex-col gap-4">
       <AccountHeader />
       <div className="grid grid-cols-1 items-start gap-4 min-[900px]:grid-cols-2">
         <div className="flex flex-col gap-4">
-          <ProfileCard />
+          <ProfileCard locked={locked} />
           <AppearanceCard />
         </div>
         <div className="flex flex-col gap-4">
-          <PasswordCard />
-          <SessionsCard />
+          <PasswordCard locked={locked} />
+          <SessionsCard locked={locked} />
         </div>
       </div>
     </div>

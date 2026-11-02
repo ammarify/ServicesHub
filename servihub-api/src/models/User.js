@@ -34,6 +34,9 @@ const userSchema = new Schema(
     passwordSetAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
     invitedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    // A seeded account that every visitor shares while DEMO_MODE is on (see
+    // utils/demoLock.js).
+    demoAccount: { type: Boolean, default: false },
   },
   {
     timestamps: true,

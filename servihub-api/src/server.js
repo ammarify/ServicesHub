@@ -4,6 +4,7 @@ import { env } from "./config/env.js";
 import { connectDB } from "./config/db.js";
 import { createApp } from "./app.js";
 import { isAiEnabled } from "./services/aiAnalysis.service.js";
+import { startDemoResets } from "./services/demoReset.service.js";
 import { initSockets } from "./sockets/index.js";
 
 async function start() {
@@ -23,7 +24,11 @@ async function start() {
         ? `AI Copilot is on (Groq model ${env.GROQ_MODEL}). "npm run check:ai" tests the key and the model.`
         : "AI Copilot is off: GROQ_API_KEY is not set."
     );
+    if (env.DEMO_MODE && env.DEMO_RESET_HOURS) {
+      console.log(`Demo data is replaced every ${env.DEMO_RESET_HOURS} h (DEMO_RESET_HOURS).`);
+    }
   });
+  startDemoResets({ io });
 
   let shuttingDown = false;
   async function shutdown(signal, exitCode = 0) {

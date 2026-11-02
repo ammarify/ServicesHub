@@ -126,6 +126,13 @@ enables two conveniences that must not exist on a real deployment:
 
 With it off, those routes answer `404` and simulator sockets are refused.
 
+Every visitor of a demo shares the seeded accounts, so while it is on they
+keep their password, name, role and status, and "log out everywhere" is
+refused for them (`403 DEMO_LOCKED`): one visitor can't lock the others out.
+Members invited during the demo aren't locked. On a public demo,
+`DEMO_RESET_HOURS` also replaces all data with fresh demo data on a schedule
+(and right away on an empty database), which signs everyone out.
+
 ### Customer simulator scoping
 
 Even in demo mode the simulator can only touch tickets it opened or picked:

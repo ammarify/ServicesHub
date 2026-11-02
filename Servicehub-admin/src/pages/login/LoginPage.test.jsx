@@ -81,4 +81,11 @@ describe("LoginPage", () => {
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/dashboard"));
     expect(server.callsTo("POST", "/auth/demo-login")[0].body).toEqual({ role: "finance" });
   });
+
+  it("says how often a shared demo's data resets", async () => {
+    setup({ config: { ...TEST_CONFIG, demoMode: true, demoResetHours: 24 } });
+
+    await userEvent.click(await screen.findByRole("button", { name: /Try a demo account/ }));
+    expect(screen.getByText("Everyone shares this demo, so its data resets every 24 hours.")).toBeInTheDocument();
+  });
 });

@@ -1,0 +1,44 @@
+# Render Blueprint for the public demo API (see "Deployment" in README.md).
+# The web app is served by Vercel, which forwards /api and /socket.io here
+# (Servicehub-admin/vercel.json), so the browser sees a single site.
+services:
+  - type: web
+    name: servihub-api
+    runtime: node
+    plan: free
+    region: virginia
+    rootDir: servihub-api
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      # MongoDB Atlas connection string, including the database name.
+      - key: MONGODB_URI
+        sync: false
+      # The Vercel URL of the web app, e.g. https://servihub-admin.vercel.app
+      - key: CLIENT_URL
+        sync: false
+      # Optional: turns on the AI Copilot.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      # Public demo: one-click sign-in, the customer simulator, and fresh
+      # demo data every 24 hours (loaded on first start, so no seeding).
+      - key: DEMO_MODE
+        value: "true"
+      - key: DEMO_RESET_HOURS
+        value: "24"
+      # Vercel's proxy, then Render's. GET /api/health/client (on while
+      # DEBUG_PROXY_HEADERS is true) shows whether visitors' IPs come through.
+      - key: TRUST_PROXY
+        value: "2"
+      - key: DEBUG_PROXY_HEADERS
+        value: "true"

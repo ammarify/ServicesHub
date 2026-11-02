@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 // own catalogue in servihub-api/src/config/services.js.
 const FALLBACK_CONFIG = {
   demoMode: false,
+  demoResetHours: null,
   googleClientId: null,
   aiEnabled: true,
   emailEnabled: false,

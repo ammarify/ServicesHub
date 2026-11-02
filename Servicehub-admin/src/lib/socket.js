@@ -1,7 +1,13 @@
 import { io as ioClient } from "socket.io-client";
-import { refreshSession } from "./api";
+import { API_BASE_URL, refreshSession } from "./api";
 
-const SOCKET_URL = new URL(import.meta.env.VITE_API_URL).origin;
+// When the API is reached through a path on this site, the host forwards
+// /socket.io as well (see vercel.json). That forwarding carries plain HTTP
+// requests but not WebSocket upgrades, so the socket stays on HTTP
+// long-polling instead of failing an upgrade on every connect.
+const IS_FORWARDED = API_BASE_URL.startsWith("/");
+const SOCKET_URL = IS_FORWARDED ? window.location.origin : new URL(API_BASE_URL).origin;
+const TRANSPORT_OPTIONS = IS_FORWARDED ? { transports: ["polling"] } : {};
 
 // Handshake rejections a token refresh can fix.
 const REFRESHABLE = new Set(["TOKEN_EXPIRED", "AUTH_REQUIRED", "INVALID_TOKEN"]);
@@ -19,6 +25,7 @@ export function createStaffSocket({ onSessionLost } = {}) {
   const socket = ioClient(SOCKET_URL, {
     withCredentials: true,
     autoConnect: false,
+    ...TRANSPORT_OPTIONS,
   });
 
   let refreshing = false;
@@ -65,5 +72,6 @@ export function createSimulatorSocket() {
   return ioClient(SOCKET_URL, {
     auth: { role: "simulator" },
     autoConnect: false,
+    ...TRANSPORT_OPTIONS,
   });
 }

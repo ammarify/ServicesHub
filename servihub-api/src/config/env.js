@@ -80,6 +80,10 @@ const envSchema = z.object({
   // simulator. On by default outside production, off in production unless
   // explicitly enabled.
   DEMO_MODE: booleanString.optional(),
+  // With DEMO_MODE on, replaces all data with fresh demo data every this many
+  // hours (and right away on an empty database). For public demos only: it
+  // wipes everything, real data included.
+  DEMO_RESET_HOURS: z.coerce.number().positive().max(720).optional(),
 
   // Business time zone used when a client doesn't send its own (dashboard
   // "today"/"this week" boundaries). ServiHub operates in Austin, TX.
@@ -91,6 +95,9 @@ const envSchema = z.object({
   // Number of reverse proxies in front of the API (Render, Railway, nginx,
   // ...). Needed so rate limiting and logs see the real client IP.
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+  // Deployment aid: turns on GET /api/health/client, which shows how the
+  // client address arrives through the proxies, for setting TRUST_PROXY.
+  DEBUG_PROXY_HEADERS: booleanString.optional().default(false),
 
   // Auth cookie scope. "lax" works when the admin app and the API share a
   // site (localhost:5173 + localhost:5000, app.example.com +

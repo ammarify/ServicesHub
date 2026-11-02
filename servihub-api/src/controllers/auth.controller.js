@@ -3,6 +3,7 @@ import { env } from "../config/env.js";
 import { User } from "../models/index.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { assertNotLockedDemoAccount } from "../utils/demoLock.js";
 import { clearAuthCookies, REFRESH_COOKIE } from "../utils/cookies.js";
 import { permissionsForRole } from "../middleware/rbac.js";
 import { invalidateAuthCache } from "../middleware/auth.js";
@@ -44,6 +45,7 @@ export function toPublicUser(user) {
     email: user.email,
     role: user.role,
     status: user.status,
+    demoAccount: Boolean(user.demoAccount),
     permissions: permissionsForRole(user.role),
   };
 }
@@ -133,6 +135,11 @@ export const logout = asyncHandler(async (req, res) => {
 });
 
 export const logoutAll = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.userId).select("demoAccount").lean();
+  assertNotLockedDemoAccount(
+    user,
+    "This is a shared demo account, so \"Sign out everywhere\" is turned off: it would sign out every visitor using it."
+  );
   await endAllSessions(req.user.userId, "logout_all");
   clearAuthCookies(res);
   res.status(200).json({ message: "Signed out of all sessions" });
@@ -148,6 +155,9 @@ export const me = asyncHandler(async (req, res) => {
 });
 
 export const updateProfile = asyncHandler(async (req, res) => {
+  const current = await User.findById(req.user.userId).select("demoAccount").lean();
+  assertNotLockedDemoAccount(current, "This is a shared demo account, so its name can't be changed.");
+
   const user = await User.findByIdAndUpdate(
     req.user.userId,
     { $set: { name: req.body.name } },
@@ -170,6 +180,7 @@ export const changePassword = asyncHandler(async (req, res) => {
   if (!user) {
     throw new ApiError(401, "User not found", "INVALID_TOKEN");
   }
+  assertNotLockedDemoAccount(user, "This is a shared demo account, so its password can't be changed.");
 
   const matches = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!matches) {
@@ -229,6 +240,7 @@ export const resetPassword = asyncHandler(async (req, res) => {
   if (!tokenDoc || !tokenDoc.user || tokenDoc.user.status !== "active") {
     throw new ApiError(400, INVALID_RESET_LINK_MESSAGE, "INVALID_PASSWORD_TOKEN");
   }
+  assertNotLockedDemoAccount(tokenDoc.user, "This is a shared demo account, so its password can't be changed.");
 
   const consumed = await consumePasswordToken(tokenDoc);
   if (!consumed) {

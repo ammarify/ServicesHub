@@ -44,7 +44,7 @@ export function App() {
   }
 
   if (isLoading) {
-    return <FullPageLoader />;
+    return <FullPageLoader waitingForServer />;
   }
 
   return (

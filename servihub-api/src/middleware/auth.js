@@ -28,6 +28,13 @@ const MAX_CACHE_ENTRIES = 10_000;
 const authCache = new Map();
 const sessionCache = new Map();
 
+// Forgets every cached user and session, for when the demo data is replaced
+// wholesale (services/demoReset.service.js).
+export function clearAuthCaches() {
+  authCache.clear();
+  sessionCache.clear();
+}
+
 function remember(cache, key, value) {
   if (cache.size >= MAX_CACHE_ENTRIES) {
     const now = Date.now();

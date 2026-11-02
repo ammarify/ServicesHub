@@ -7,3 +7,4 @@ export { Refund } from "./Refund.js";
 export { Session } from "./Session.js";
 export { PasswordToken } from "./PasswordToken.js";
 export { Counter } from "./Counter.js";
+export { DemoState } from "./DemoState.js";

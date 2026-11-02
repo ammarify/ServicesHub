@@ -18,6 +18,8 @@ const testEnv = {
   RESEND_API_KEY: "",
   RESET_PASSWORD_URL_BASE: "",
   DEMO_MODE: "true",
+  DEMO_RESET_HOURS: "",
+  DEBUG_PROXY_HEADERS: "",
   DISABLE_RATE_LIMITS: "true",
   APP_TIMEZONE: "America/Chicago",
   COOKIE_SAMESITE: "lax",

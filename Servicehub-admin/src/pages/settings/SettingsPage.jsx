@@ -11,6 +11,7 @@ import { StatusBadge } from "../../components/ui/StatusBadge";
 import { useAuth } from "../../context/AuthContext";
 import { useConfirm } from "../../context/ConfirmContext";
 import { useToast } from "../../context/ToastContext";
+import { useAppConfig } from "../../hooks/useConfig";
 import {
   useResendInvite,
   useRevokeInvite,
@@ -36,7 +37,11 @@ export function SettingsPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const { data: members = [], isLoading, isError, refetch } = useTeam();
+  const { demoMode } = useAppConfig();
   const canManageTeam = can(user, "team.manage");
+  // Seeded accounts are shared by every demo visitor, so they're locked.
+  const isLockedDemoAccount = (member) => Boolean(demoMode && member.demoAccount);
+  const hasLockedDemoAccounts = members.some(isLockedDemoAccount);
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [roleDialogMember, setRoleDialogMember] = useState(null);
@@ -155,6 +160,7 @@ export function SettingsPage() {
                 <div className="flex justify-end">
                   <TeamRowMenu
                     member={member}
+                    locked={isLockedDemoAccount(member)}
                     onChangeRole={() => setRoleDialogMember(member)}
                     onToggleStatus={() => handleToggleStatus(member)}
                     onResendInvite={() => handleResendInvite(member)}
@@ -175,6 +181,7 @@ export function SettingsPage() {
           <p className="mt-0.5 text-[13px] text-text-secondary">
             <span className="font-data">{members.length}</span> members. Changing a role or disabling an account signs
             that person out immediately.
+            {canManageTeam && hasLockedDemoAccounts && " The shared demo accounts are locked: add a member to try it."}
           </p>
         </div>
         {canManageTeam && (
